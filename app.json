@@ -24,6 +24,11 @@
         "foregroundImage": "./assets/images/splash-icon.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDummyKeyForPreventingCrash12345678"
+        }
       }
     },
     "web": {
@@ -32,7 +37,13 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Pothole Alert to use your location."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -43,15 +43,19 @@ export const MapViewWrapper = forwardRef<MapView, MapViewWrapperProps>(
         showsUserLocation={showsUserLocation}
         showsMyLocationButton={false}
         showsCompass={false}
-        mapType={Platform.OS === "android" && isOffline ? "none" : mapType}
+        mapType={Platform.OS === "android" ? "none" : mapType}
         onPress={(e) => {
           if (onMapPress) onMapPress(e.nativeEvent.coordinate);
         }}
       >
-        {/* Offline Tile Layer (CartoDB Positron - Only shown when offline) */}
-        {isOffline && (
+        {/* Custom Tile Layer for Android (Bypasses Google Maps API Key requirement) or Offline Mode */}
+        {(Platform.OS === "android" || isOffline) && (
           <UrlTile
-            urlTemplate="https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png"
+            urlTemplate={
+              mapType === "satellite" || mapType === "hybrid"
+                ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                : "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png"
+            }
             maximumZ={19}
             flipY={false}
             shouldReplaceCustomLayer={true}
