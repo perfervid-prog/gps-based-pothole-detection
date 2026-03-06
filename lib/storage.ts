@@ -1,8 +1,9 @@
 import * as Crypto from "expo-crypto";
-import { Platform } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// In a real app, this should come from process.env.EXPO_PUBLIC_API_URL
-const API_URL = Platform.OS === 'android' ? 'http://10.0.2.2:5000/api' : 'http://localhost:5000/api';
+const PROJECT_ID = "pothole-alert-f0058";
+const FIREBASE_REST_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/potholes`;
+const CACHE_KEY = "@potholes_cache";
 
 export interface Pothole {
   id: string;
@@ -10,55 +11,175 @@ export interface Pothole {
   longitude: string;
   magnitude: string;
   reportedAt: string;
+  isOffline?: boolean; // Flag for locally created/unsynced data
 }
 
-export async function getPotholes(): Promise<Pothole[]> {
+// Internal helper to get cached data
+async function getCachedPotholes(): Promise<Pothole[]> {
   try {
-    const response = await fetch(`${API_URL}/potholes`);
-    if (!response.ok) throw new Error("Failed to fetch potholes");
-    return await response.json();
-  } catch (error) {
-    console.error("getPotholes error:", error);
+    const cached = await AsyncStorage.getItem(CACHE_KEY);
+    return cached ? JSON.parse(cached) : [];
+  } catch {
     return [];
   }
 }
 
-export async function savePothole(pothole: { latitude: number; longitude: number; magnitude?: number }): Promise<Pothole> {
+// Internal helper to set cached data
+async function setCachedPotholes(potholes: Pothole[]): Promise<void> {
   try {
-    const response = await fetch(`${API_URL}/potholes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        latitude: pothole.latitude.toString(),
-        longitude: pothole.longitude.toString(),
-        magnitude: (pothole.magnitude || 0).toString(),
-      }),
-    });
-    if (!response.ok) throw new Error("Failed to save pothole");
-    return await response.json();
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(potholes));
   } catch (error) {
-    console.error("savePothole error:", error);
-    // Fallback Mock for UI testing if server is down
-    return {
-      id: Crypto.randomUUID(),
-      latitude: pothole.latitude.toString(),
-      longitude: pothole.longitude.toString(),
-      magnitude: (pothole.magnitude || 0).toString(),
-      reportedAt: new Date().toISOString(),
-    };
+    console.error("Cache storage error:", error);
   }
 }
 
+export async function getPotholes(): Promise<Pothole[]> {
+  // 1. Return cached data immediately for speed/offline
+  const localData = await getCachedPotholes();
+
+  try {
+    const response = await fetch(FIREBASE_REST_URL);
+    if (!response.ok) throw new Error("Network error");
+
+    const data = await response.json();
+    if (!data.documents) {
+      await setCachedPotholes([]);
+      return [];
+    }
+
+    const remoteData: Pothole[] = data.documents.map((doc: any) => {
+      const fields = doc.fields;
+      return {
+        id: doc.name.split("/").pop(),
+        latitude: fields.latitude.stringValue,
+        longitude: fields.longitude.stringValue,
+        magnitude: fields.magnitude.stringValue,
+        reportedAt: fields.reportedAt.stringValue,
+      };
+    });
+
+    // 2. Merge logic: keep local "isOffline" data that hasn't synced yet
+    const offlineItems = localData.filter(p => p.isOffline);
+    const finalData = [...remoteData, ...offlineItems];
+
+    await setCachedPotholes(finalData);
+    return finalData;
+  } catch (error) {
+    console.log("Fetch failed, serving purely from cache");
+    return localData;
+  }
+}
+
+export async function savePothole(pothole: { latitude: number; longitude: number; magnitude?: number }): Promise<Pothole> {
+  const newId = Crypto.randomUUID();
+  const tempPothole: Pothole = {
+    id: newId,
+    latitude: pothole.latitude.toString(),
+    longitude: pothole.longitude.toString(),
+    magnitude: (pothole.magnitude || 0).toString(),
+    reportedAt: new Date().toISOString(),
+    isOffline: true
+  };
+
+  // 1. Aggressively update local cache
+  const current = await getCachedPotholes();
+  await setCachedPotholes([...current, tempPothole]);
+
+  try {
+    const response = await fetch(FIREBASE_REST_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fields: {
+          latitude: { stringValue: pothole.latitude.toString() },
+          longitude: { stringValue: pothole.longitude.toString() },
+          magnitude: { stringValue: (pothole.magnitude || 0).toString() },
+          reportedAt: { stringValue: tempPothole.reportedAt },
+        },
+      }),
+    });
+
+    if (response.ok) {
+      const doc = await response.json();
+      const syncedPothole: Pothole = {
+        id: doc.name.split("/").pop(),
+        latitude: doc.fields.latitude.stringValue,
+        longitude: doc.fields.longitude.stringValue,
+        magnitude: doc.fields.magnitude.stringValue,
+        reportedAt: doc.fields.reportedAt.stringValue,
+      };
+
+      // Replace temp with synced version
+      const updated = (await getCachedPotholes()).map(p => p.id === newId ? syncedPothole : p);
+      await setCachedPotholes(updated);
+      return syncedPothole;
+    }
+  } catch (error) {
+    console.log("Save failed, kept as offline item");
+  }
+
+  return tempPothole;
+}
+
 export async function updatePothole(id: string, updates: Partial<Pick<Pothole, "latitude" | "longitude">>): Promise<Pothole | null> {
-  // Note: Backend doesn't have UPDATE yet, skipping for now or implementing local fallback
-  return null;
+  // 1. Update local cache immediately
+  const current = await getCachedPotholes();
+  const target = current.find(p => p.id === id);
+  if (!target) return null;
+
+  const localUpdated: Pothole = {
+    ...target,
+    latitude: updates.latitude?.toString() || target.latitude,
+    longitude: updates.longitude?.toString() || target.longitude,
+    isOffline: target.isOffline // Keep offline status if it already had it
+  };
+
+  await setCachedPotholes(current.map(p => p.id === id ? localUpdated : p));
+
+  try {
+    const url = `${FIREBASE_REST_URL}/${id}?updateMask.fieldPaths=latitude&updateMask.fieldPaths=longitude`;
+    const fields: any = {};
+    if (updates.latitude !== undefined) fields.latitude = { stringValue: updates.latitude.toString() };
+    if (updates.longitude !== undefined) fields.longitude = { stringValue: updates.longitude.toString() };
+
+    const response = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields }),
+    });
+
+    if (response.ok) {
+      const doc = await response.json();
+      const synced: Pothole = {
+        id: doc.name.split("/").pop(),
+        latitude: doc.fields.latitude.stringValue,
+        longitude: doc.fields.longitude.stringValue,
+        magnitude: doc.fields.magnitude.stringValue,
+        reportedAt: doc.fields.reportedAt.stringValue,
+      };
+      return synced;
+    }
+  } catch (error) {
+    console.log("Update failed locally, but cached on device");
+  }
+  return localUpdated;
 }
 
 export async function deletePothole(id: string): Promise<boolean> {
-  // Note: Backend doesn't have DELETE yet
-  return false;
+  // 1. Remove from local cache immediately
+  const current = await getCachedPotholes();
+  await setCachedPotholes(current.filter(p => p.id !== id));
+
+  try {
+    const url = `${FIREBASE_REST_URL}/${id}`;
+    const response = await fetch(url, { method: "DELETE" });
+    return response.ok;
+  } catch (error) {
+    console.log("Delete failed server-side, but removed from device cache");
+    return true; // Return true because it's effectively "gone" for the user
+  }
 }
 
 export async function clearAllPotholes(): Promise<void> {
-  // Note: Backend doesn't have CLEAR yet
+  await AsyncStorage.removeItem(CACHE_KEY);
 }

@@ -108,7 +108,17 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
           }
 
           potholeMarkers.forEach(m => {
-            const marker = L.marker([m[0], m[1]]).addTo(map);
+            // Create a red-ish icon for potholes
+            const potholeIcon = L.icon({
+              iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+              shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+              iconSize: [25, 41],
+              iconAnchor: [12, 41],
+              popupAnchor: [1, -34],
+              shadowSize: [41, 41]
+            });
+
+            const marker = L.marker([m[0], m[1]], { icon: potholeIcon }).addTo(map);
             marker.on('click', () => {
               window.parent.postMessage({ type: 'marker_press', id: m[2] }, '*');
             });
@@ -132,7 +142,7 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
                   
                   // If following, center on user with a tighter zoom for navigation
                   if (event.data.follow) {
-                      map.setView([event.data.lat, event.data.lng], 17, { animate: true });
+                      map.setView([event.data.lat, event.data.lng], 19, { animate: true });
                   }
               }
           });

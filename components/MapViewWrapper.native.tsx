@@ -1,6 +1,6 @@
 import React, { forwardRef } from "react";
-import { StyleSheet } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import { StyleSheet, Platform, View } from "react-native";
+import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 
@@ -26,11 +26,15 @@ interface MapViewWrapperProps {
   userLocation?: Coordinate | null;
   markers: PotholeMarker[];
   onMarkerPress: (marker: PotholeMarker) => void;
+  onMapPress?: (coordinate: Coordinate) => void;
   route?: Coordinate[] | null;
+  isOffline?: boolean;
+  selectionMarker?: Coordinate | null;
+  mapType?: "standard" | "satellite" | "hybrid" | "terrain";
 }
 
 export const MapViewWrapper = forwardRef<MapView, MapViewWrapperProps>(
-  ({ initialRegion, showsUserLocation, userLocation, markers, onMarkerPress, route }, ref) => {
+  ({ initialRegion, showsUserLocation, userLocation, markers, onMarkerPress, onMapPress, route, isOffline, selectionMarker, mapType = "standard" }, ref) => {
     return (
       <MapView
         ref={ref}
@@ -39,7 +43,35 @@ export const MapViewWrapper = forwardRef<MapView, MapViewWrapperProps>(
         showsUserLocation={showsUserLocation}
         showsMyLocationButton={false}
         showsCompass={false}
+        mapType={Platform.OS === "android" && isOffline ? "none" : mapType}
+        onPress={(e) => {
+          if (onMapPress) onMapPress(e.nativeEvent.coordinate);
+        }}
       >
+        {/* Offline Tile Layer (CartoDB Positron - Only shown when offline) */}
+        {isOffline && (
+          <UrlTile
+            urlTemplate="https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png"
+            maximumZ={19}
+            flipY={false}
+            shouldReplaceCustomLayer={true}
+            tileSize={256}
+          />
+        )}
+
+        {selectionMarker && (
+          <Marker
+            coordinate={selectionMarker}
+            title="Selected Destination"
+            pinColor={Colors.accent}
+          >
+            <View style={styles.selectionMarkerContainer}>
+              <View style={styles.selectionMarkerPulse} />
+              <Ionicons name="location" size={32} color={Colors.accent} />
+            </View>
+          </Marker>
+        )}
+
         {route && route.length > 0 && (
           <>
             <Polyline
@@ -50,9 +82,9 @@ export const MapViewWrapper = forwardRef<MapView, MapViewWrapperProps>(
             <Marker
               coordinate={route[route.length - 1]}
               title="Destination"
-              pinColor={Colors.accent}
+              pinColor={Colors.primary}
             >
-              <Ionicons name="location" size={32} color={Colors.accent} />
+              <Ionicons name="location" size={32} color={Colors.primary} />
             </Marker>
           </>
         )}
@@ -72,3 +104,18 @@ export const MapViewWrapper = forwardRef<MapView, MapViewWrapperProps>(
     );
   }
 );
+const styles = StyleSheet.create({
+  selectionMarkerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionMarkerPulse: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: Colors.accent + '30',
+    borderWidth: 2,
+    borderColor: Colors.accent,
+  },
+});

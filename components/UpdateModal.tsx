@@ -21,6 +21,7 @@ interface UpdateModalProps {
   onClose: () => void;
   onUpdate: (latitude: number, longitude: number) => void;
   onDelete?: (id: string) => void;
+  isAdmin?: boolean;
   pothole?: Pothole | null;
 }
 
@@ -29,6 +30,7 @@ export default function UpdateModal({
   onClose,
   onUpdate,
   onDelete,
+  isAdmin = false,
   pothole,
 }: UpdateModalProps) {
   const insets = useSafeAreaInsets();
@@ -129,53 +131,64 @@ export default function UpdateModal({
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Longitude</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, !isAdmin && { backgroundColor: 'rgba(255,255,255,0.5)' }]}
               value={longitude}
               onChangeText={setLongitude}
               placeholder="e.g. 19.9370"
               placeholderTextColor={Colors.textSecondary}
               keyboardType="numeric"
               returnKeyType="next"
+              editable={isAdmin}
             />
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Latitude</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, !isAdmin && { backgroundColor: 'rgba(255,255,255,0.5)' }]}
               value={latitude}
               onChangeText={setLatitude}
               placeholder="e.g. 50.0614"
               placeholderTextColor={Colors.textSecondary}
               keyboardType="numeric"
               returnKeyType="done"
-              onSubmitEditing={handleUpdate}
+              editable={isAdmin}
+              onSubmitEditing={isAdmin ? handleUpdate : undefined}
             />
           </View>
 
-          <Pressable
-            onPress={handleUpdate}
-            style={({ pressed }) => [
-              styles.updateButton,
-              pressed && styles.updateButtonPressed,
-            ]}
-          >
-            <Text style={styles.updateButtonText}>
-              {pothole ? "Update" : "Add"}
-            </Text>
-          </Pressable>
+          {isAdmin ? (
+            <>
+              <Pressable
+                onPress={handleUpdate}
+                style={({ pressed }) => [
+                  styles.updateButton,
+                  pressed && styles.updateButtonPressed,
+                ]}
+              >
+                <Text style={styles.updateButtonText}>
+                  {pothole ? "Update" : "Add"}
+                </Text>
+              </Pressable>
 
-          {pothole && onDelete && (
-            <Pressable
-              onPress={handleDelete}
-              style={({ pressed }) => [
-                styles.deleteButton,
-                pressed && styles.deleteButtonPressed,
-              ]}
-            >
-              <Ionicons name="trash-outline" size={18} color={Colors.textLight} style={{ marginRight: 6 }} />
-              <Text style={styles.deleteButtonText}>Delete Pothole</Text>
-            </Pressable>
+              {pothole && onDelete && (
+                <Pressable
+                  onPress={handleDelete}
+                  style={({ pressed }) => [
+                    styles.deleteButton,
+                    pressed && styles.deleteButtonPressed,
+                  ]}
+                >
+                  <Ionicons name="trash-outline" size={18} color={Colors.textLight} style={{ marginRight: 6 }} />
+                  <Text style={styles.deleteButtonText}>Delete Pothole</Text>
+                </Pressable>
+              )}
+            </>
+          ) : (
+            <View style={styles.readonlyNotice}>
+              <Ionicons name="information-circle-outline" size={16} color="rgba(255,255,255,0.8)" />
+              <Text style={styles.readonlyText}>Logged in as Guest (Read-Only)</Text>
+            </View>
           )}
         </View>
       </KeyboardAvoidingView>
@@ -269,4 +282,18 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
     color: Colors.textLight,
   },
+  readonlyNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  readonlyText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    fontWeight: '600',
+  }
 });

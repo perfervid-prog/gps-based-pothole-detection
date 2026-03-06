@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode, useCallback } from "react";
-import { getPotholes, savePothole, updatePothole, clearAllPotholes, Pothole } from "@/lib/storage";
+import { getPotholes, savePothole, updatePothole, deletePothole, clearAllPotholes, Pothole } from "@/lib/storage";
 
 interface PotholeContextValue {
   potholes: Pothole[];
@@ -9,6 +9,9 @@ interface PotholeContextValue {
   editPothole: (id: string, latitude: number, longitude: number) => Promise<void>;
   clearAll: () => Promise<void>;
   refresh: () => Promise<void>;
+  isAdmin: boolean;
+  loginAdmin: (password: string) => boolean;
+  logoutAdmin: () => void;
   selectedPothole: Pothole | null;
   setSelectedPothole: (p: Pothole | null) => void;
 }
@@ -19,6 +22,7 @@ export function PotholeProvider({ children }: { children: ReactNode }) {
   const [potholes, setPotholes] = useState<Pothole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPothole, setSelectedPothole] = useState<Pothole | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
@@ -54,6 +58,19 @@ export function PotholeProvider({ children }: { children: ReactNode }) {
     setPotholes([]);
   }, []);
 
+  const loginAdmin = useCallback((password: string) => {
+    // Simple hardcoded password for now
+    if (password === "admin123") {
+      setIsAdmin(true);
+      return true;
+    }
+    return false;
+  }, []);
+
+  const logoutAdmin = useCallback(() => {
+    setIsAdmin(false);
+  }, []);
+
   const value = useMemo(
     () => ({
       potholes,
@@ -65,8 +82,11 @@ export function PotholeProvider({ children }: { children: ReactNode }) {
       refresh,
       selectedPothole,
       setSelectedPothole,
+      isAdmin,
+      loginAdmin,
+      logoutAdmin,
     }),
-    [potholes, isLoading, addPothole, removePothole, editPothole, clearAll, refresh, selectedPothole]
+    [potholes, isLoading, addPothole, removePothole, editPothole, clearAll, refresh, selectedPothole, isAdmin, loginAdmin, logoutAdmin]
   );
 
   return (

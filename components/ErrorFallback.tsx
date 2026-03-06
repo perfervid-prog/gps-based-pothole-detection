@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { reloadAppAsync } from "expo";
 import {
   StyleSheet,
   View,
@@ -9,6 +8,7 @@ import {
   Modal,
   useColorScheme,
   Platform,
+  DevSettings,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -34,12 +34,16 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
 
   const [isModalVisible, setIsModalVisible] = useState(false);
 
-  const handleRestart = async () => {
-    try {
-      await reloadAppAsync();
-    } catch (restartError) {
-      console.error("Failed to restart app:", restartError);
-      resetError();
+  const handleRestart = () => {
+    if (Platform.OS === "web") {
+      window.location.reload();
+    } else {
+      try {
+        DevSettings.reload();
+      } catch (restartError) {
+        console.error("Failed to restart app:", restartError);
+        resetError();
+      }
     }
   };
 

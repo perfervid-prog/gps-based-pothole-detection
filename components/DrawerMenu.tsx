@@ -18,12 +18,14 @@ import Animated, {
 } from "react-native-reanimated";
 import { useEffect } from "react";
 import Colors from "@/constants/colors";
+import { usePotholes } from "@/contexts/PotholeContext";
 
 interface DrawerMenuProps {
   visible: boolean;
   onClose: () => void;
   onNavigate: (screen: "home" | "settings" | "update") => void;
   onExit: () => void;
+  onNavigateToAdminLogin: () => void;
 }
 
 interface MenuItem {
@@ -88,7 +90,9 @@ export default function DrawerMenu({
   onClose,
   onNavigate,
   onExit,
+  onNavigateToAdminLogin,
 }: DrawerMenuProps) {
+  const { isAdmin, logoutAdmin } = usePotholes();
   const insets = useSafeAreaInsets();
   const slideAnim = useSharedValue(-300);
   const overlayOpacity = useSharedValue(0);
@@ -149,6 +153,38 @@ export default function DrawerMenu({
               onPress={() => handlePress(item.key)}
             />
           ))}
+
+          <View style={styles.adminSection}>
+            <View style={styles.divider} />
+            {isAdmin ? (
+              <Pressable
+                onPress={() => {
+                  logoutAdmin();
+                  onClose();
+                }}
+                style={styles.adminToggle}
+              >
+                <View style={styles.menuItemIcon}>
+                  <Ionicons name="shield-checkmark" size={20} color={Colors.primary} />
+                </View>
+                <Text style={[styles.menuItemText, { fontSize: 14, color: Colors.primary }]}>
+                  Logout Admin
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={onNavigateToAdminLogin}
+                style={styles.adminToggle}
+              >
+                <View style={styles.menuItemIcon}>
+                  <Ionicons name="shield-outline" size={20} color={Colors.textSecondary} />
+                </View>
+                <Text style={[styles.menuItemText, { fontSize: 14 }]}>
+                  Admin Login
+                </Text>
+              </Pressable>
+            )}
+          </View>
         </Animated.View>
       </View>
     </Modal>
@@ -208,4 +244,16 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
     color: Colors.textPrimary,
   },
+  adminSection: {
+    marginTop: 'auto',
+    marginBottom: 20,
+  },
+  adminToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    gap: 16,
+    opacity: 0.8,
+  }
 });

@@ -20,9 +20,17 @@ interface RouteSelectionProps {
     isLoading?: boolean;
     history?: string[];
     onDeleteHistoryItem?: (item: string) => void;
+    onPickFromMap?: () => void;
 }
 
-export default function RouteSelection({ onRouteSelect, onBack, isLoading, history = [], onDeleteHistoryItem }: RouteSelectionProps) {
+export default function RouteSelection({
+    onRouteSelect,
+    onBack,
+    isLoading,
+    history = [],
+    onDeleteHistoryItem,
+    onPickFromMap
+}: RouteSelectionProps) {
     const [source, setSource] = useState("Current Location");
     const [destination, setDestination] = useState("");
 
@@ -99,6 +107,12 @@ export default function RouteSelection({ onRouteSelect, onBack, isLoading, histo
                                 placeholderTextColor={Colors.textSecondary}
                                 autoFocus
                             />
+                            <Pressable
+                                onPress={onPickFromMap}
+                                style={({ pressed }) => [styles.inlineMapPick, pressed && { opacity: 0.7 }]}
+                            >
+                                <Ionicons name="map-outline" size={20} color={Colors.primary} />
+                            </Pressable>
                         </View>
                     </View>
                 </View>
@@ -427,5 +441,23 @@ const styles = StyleSheet.create({
     },
     removeButton: {
         padding: 8,
+    },
+    inputWrapper: {
+        height: 48,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    input: {
+        flex: 1,
+        fontSize: 16,
+        color: Colors.textPrimary,
+        fontFamily: "Inter_500Medium",
+    },
+    inlineMapPick: {
+        padding: 8,
+        marginLeft: 8,
+        backgroundColor: Colors.primary + "15",
+        borderRadius: 10,
     },
 });

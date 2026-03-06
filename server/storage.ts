@@ -1,6 +1,6 @@
-import { users, potholes, type User, type InsertUser, type Pothole, type InsertPothole } from "../shared/schema";
-import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { type User, type InsertUser, type Pothole, type InsertPothole } from "../shared/schema";
+import { db } from "./firebase";
+import { randomUUID } from "crypto";
 
 // modify the interface with any CRUD methods
 // you might need
@@ -15,30 +15,43 @@ export interface IStorage {
   createPothole(pothole: InsertPothole): Promise<Pothole>;
 }
 
-export class DatabaseStorage implements IStorage {
+export class FirebaseStorage implements IStorage {
+  private usersColl = db.collection("users");
+  private potholesColl = db.collection("potholes");
+
   async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    const doc = await this.usersColl.doc(id).get();
+    return doc.exists ? (doc.data() as User) : undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user;
+    const snapshot = await this.usersColl.where("username", "==", username).get();
+    if (snapshot.empty) return undefined;
+    return snapshot.docs[0].data() as User;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
+    const id = randomUUID();
+    const user = { ...insertUser, id };
+    await this.usersColl.doc(id).set(user);
+    return user as User;
   }
 
   async getPotholes(): Promise<Pothole[]> {
-    return await db.select().from(potholes);
+    const snapshot = await this.potholesColl.orderBy("reportedAt", "desc").get();
+    return snapshot.docs.map(doc => doc.data() as Pothole);
   }
 
   async createPothole(insertPothole: InsertPothole): Promise<Pothole> {
-    const [pothole] = await db.insert(potholes).values(insertPothole).returning();
+    const id = randomUUID();
+    const pothole: Pothole = {
+      ...insertPothole,
+      id,
+      reportedAt: new Date().toISOString()
+    };
+    await this.potholesColl.doc(id).set(pothole);
     return pothole;
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new FirebaseStorage();

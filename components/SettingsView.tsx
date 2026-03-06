@@ -14,8 +14,9 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { usePotholes } from "@/contexts/PotholeContext";
 import { Pothole } from "@/lib/storage";
-import { resetOnboarding } from "@/lib/onboarding";
-import { DevSettings } from "react-native";
+import { resetOnboarding, getAlertSettings, setAlertSetting } from "@/lib/onboarding";
+import { DevSettings, Switch } from "react-native";
+import { useEffect } from "react";
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -134,6 +135,26 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
   const { potholes, clearAll, removePothole } = usePotholes();
   const webBottom = Platform.OS === "web" ? 34 : 0;
   const [showPotholeList, setShowPotholeList] = useState(false);
+  const [alertSettings, setAlertSettings] = useState({ enabled: true, sound: true, flash: true });
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    const settings = await getAlertSettings();
+    setAlertSettings(settings);
+  };
+
+  const handleToggleAlert = async (key: keyof typeof alertSettings) => {
+    const newValue = !alertSettings[key];
+    await setAlertSetting(key, newValue);
+    setAlertSettings(prev => ({ ...prev, [key]: newValue }));
+
+    if (Platform.OS !== "web") {
+      Haptics.selectionAsync();
+    }
+  };
 
   const handleClearAll = () => {
     if (potholes.length === 0) {
@@ -255,6 +276,61 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
             onPress={handleResetOnboarding}
             destructive
           />
+        </View>
+
+        <Text style={styles.sectionTitle}>Alerts</Text>
+        <View style={styles.section}>
+          <View style={styles.settingRow}>
+            <View style={styles.settingIcon}>
+              <Ionicons name="notifications-outline" size={22} color={Colors.primary} />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={styles.settingLabel}>Proximity Alerts</Text>
+              <Text style={styles.settingSubtitle}>Warn when approaching a pothole</Text>
+            </View>
+            <Switch
+              value={alertSettings.enabled}
+              onValueChange={() => handleToggleAlert("enabled")}
+              trackColor={{ false: "#D1D1D1", true: Colors.primary }}
+              thumbColor={Platform.OS === "ios" ? undefined : "#FFFFFF"}
+            />
+          </View>
+
+          {alertSettings.enabled && (
+            <>
+              <View style={styles.separator} />
+              <View style={styles.settingRow}>
+                <View style={styles.settingIcon}>
+                  <Ionicons name="volume-medium-outline" size={22} color={Colors.primary} />
+                </View>
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Sound Effects</Text>
+                  <Text style={styles.settingSubtitle}>Play alert sound for warnings</Text>
+                </View>
+                <Switch
+                  value={alertSettings.sound}
+                  onValueChange={() => handleToggleAlert("sound")}
+                  trackColor={{ false: "#D1D1D1", true: Colors.primary }}
+                />
+              </View>
+
+              <View style={styles.separator} />
+              <View style={styles.settingRow}>
+                <View style={styles.settingIcon}>
+                  <Ionicons name="flash-outline" size={22} color={Colors.primary} />
+                </View>
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Visual Flash</Text>
+                  <Text style={styles.settingSubtitle}>Flash screen for warnings</Text>
+                </View>
+                <Switch
+                  value={alertSettings.flash}
+                  onValueChange={() => handleToggleAlert("flash")}
+                  trackColor={{ false: "#D1D1D1", true: Colors.primary }}
+                />
+              </View>
+            </>
+          )}
         </View>
 
         <Text style={styles.sectionTitle}>About</Text>
