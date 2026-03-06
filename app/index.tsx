@@ -132,7 +132,7 @@ export default function HomeScreen() {
     isLoading,
     refresh,
     addPothole,
-    updatePothole,
+    editPothole,
     removePothole,
     selectedPothole,
     setSelectedPothole,
@@ -677,7 +677,7 @@ export default function HomeScreen() {
 
   const handleUpdatePothole = async (lat: number, lng: number) => {
     if (selectedPothole) {
-      await updatePothole(selectedPothole.id, lat, lng);
+      await editPothole(selectedPothole.id, lat, lng);
       setSelectedPothole(null);
     } else {
       await addPothole(lat, lng);
@@ -1279,5 +1279,18 @@ const styles = StyleSheet.create({
   mapPickConfirmText: {
     color: Colors.textLight,
     fontWeight: '700',
+  },
+  processingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2000,
+  },
+  processingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: Colors.primary,
+    fontWeight: '600',
   },
 });
