@@ -370,11 +370,6 @@ export default function HomeScreen() {
     setActiveRoute(null);
   };
 
-  const handleDeleteHistoryItem = async (item: string) => {
-    const newHistory = searchHistory.filter(s => s !== item);
-    setSearchHistory(newHistory);
-    await AsyncStorage.setItem("search_history", JSON.stringify(newHistory));
-  };
 
   const handleChangeVehicle = () => {
     setOnboardingStep("vehicle");
