@@ -224,7 +224,7 @@ export default function RouteSelection({
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.background,
+        backgroundColor: Colors.background + 'F0', // 94% opacity to see map behind
     },
     header: {
         paddingTop: 60,

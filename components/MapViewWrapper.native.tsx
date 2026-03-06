@@ -3,6 +3,7 @@ import { StyleSheet, Platform, View } from "react-native";
 import MapView, { Marker, Polyline, UrlTile } from "react-native-maps";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { WebViewMap } from "./WebViewMap";
 
 interface PotholeMarker {
   id: string;
@@ -33,36 +34,44 @@ interface MapViewWrapperProps {
   mapType?: "standard" | "satellite" | "hybrid" | "terrain";
 }
 
-export const MapViewWrapper = forwardRef<MapView, MapViewWrapperProps>(
+export const MapViewWrapper = forwardRef<any, MapViewWrapperProps>(
   ({ initialRegion, showsUserLocation, userLocation, markers, onMarkerPress, onMapPress, route, isOffline, selectionMarker, mapType = "standard" }, ref) => {
+
+    // NATIVE ANDROID FALLBACK: Bypass Google Maps SDK and fake API Key completely using Leaflet WebView
+    if (Platform.OS === "android") {
+      return (
+        <WebViewMap
+          ref={ref}
+          initialRegion={initialRegion}
+          markers={markers.map(m => ({
+            id: m.id,
+            latitude: typeof m.latitude === 'string' ? parseFloat(m.latitude) : m.latitude,
+            longitude: typeof m.longitude === 'string' ? parseFloat(m.longitude) : m.longitude
+          }))}
+          onMarkerPress={onMarkerPress}
+          onMapPress={onMapPress}
+          route={route}
+          userLocation={userLocation}
+          selectionMarker={selectionMarker}
+          mapType={mapType}
+        />
+      );
+    }
+
+    // IOS NATIVE MAPKIT (Uses Apple Maps natively, no API key needed, extremely fast)
     return (
       <MapView
         ref={ref}
-        style={StyleSheet.absoluteFill}
+        style={{ flex: 1, width: '100%', height: '100%' }}
         initialRegion={initialRegion}
         showsUserLocation={showsUserLocation}
         showsMyLocationButton={false}
         showsCompass={false}
-        mapType={Platform.OS === "android" ? "none" : mapType}
+        mapType={mapType}
         onPress={(e) => {
           if (onMapPress) onMapPress(e.nativeEvent.coordinate);
         }}
       >
-        {/* Custom Tile Layer for Android (Bypasses Google Maps API Key requirement) or Offline Mode */}
-        {(Platform.OS === "android" || isOffline) && (
-          <UrlTile
-            urlTemplate={
-              mapType === "satellite" || mapType === "hybrid"
-                ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                : "https://a.basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}.png"
-            }
-            maximumZ={19}
-            flipY={false}
-            shouldReplaceCustomLayer={true}
-            tileSize={256}
-          />
-        )}
-
         {selectionMarker && (
           <Marker
             coordinate={selectionMarker}
