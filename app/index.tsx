@@ -780,6 +780,16 @@ export default function HomeScreen() {
     );
   }
 
+  const handleDeleteHistoryItem = async (item: string) => {
+    const newHistory = searchHistory.filter(h => h !== item);
+    setSearchHistory(newHistory);
+    try {
+      await AsyncStorage.setItem("search_history", JSON.stringify(newHistory));
+    } catch (e) {
+      console.log("Failed to save history after delete", e);
+    }
+  };
+
   const handlePickFromMap = () => {
     setIsPickingFromMap(true);
     setOnboardingStep("done"); // Slide back to map
