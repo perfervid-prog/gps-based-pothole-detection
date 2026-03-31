@@ -19,6 +19,12 @@
     },
     "android": {
       "package": "com.potholealert.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#1A6B7A",
         "foregroundImage": "./assets/images/splash-icon.png",

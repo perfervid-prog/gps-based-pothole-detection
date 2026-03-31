@@ -49,15 +49,17 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
         <style>
           body { margin: 0; padding: 0; }
           #map { height: 100vh; width: 100vw; }
-          .leaflet-marker-icon { filter: hue-rotate(140deg); }
+          .leaflet-marker-icon { filter: drop-shadow(0 4px 4px rgba(0,0,0,0.4)); }
+          #map { perspective: 1000px; background: #f0f0f0; }
           .user-location-pulse {
               width: 14px;
               height: 14px;
               background: #007AFF;
               border-radius: 50%;
               border: 2px solid white;
-              box-shadow: 0 0 10px rgba(0, 122, 255, 0.5);
+              box-shadow: 0 4px 10px rgba(0, 122, 255, 0.6);
               position: relative;
+              transform: translateY(-2px);
           }
           .user-location-pulse::after {
               content: '';
@@ -71,8 +73,8 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
               animation: pulse 2s infinite;
           }
           @keyframes pulse {
-              0% { transform: scale(1); opacity: 1; }
-              100% { transform: scale(3); opacity: 0; }
+              0% { transform: scale(1) translateY(0); opacity: 1; }
+              100% { transform: scale(3) translateY(0); opacity: 0; }
           }
         </style>
       </head>

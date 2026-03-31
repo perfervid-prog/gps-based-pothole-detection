@@ -42,11 +42,11 @@ const FIREBASE_REST_URL = "https://firestore.googleapis.com/v1/projects/pothole-
 
 // Global Map Configuration (Google Maps style)
 const MAP_CONFIG = {
-  PITCH: 65,
-  ZOOM: 19.2,
-  HOME_PITCH: 0,
+  PITCH: 75,
+  ZOOM: 20.1,
+  HOME_PITCH: 60,
   HOME_LAT_DELTA: 0.005,
-  LOOKAHEAD_DISTANCE: 25, // meters
+  LOOKAHEAD_DISTANCE: 100, // meters
   ANIMATION_DURATION: 1200,
   OVERVIEW_PADDING: { top: 100, right: 80, bottom: 250, left: 80 },
 };
@@ -141,11 +141,19 @@ export default function HomeScreen() {
     logoutAdmin,
   } = usePotholes();
 
-  // Onboarding state
+  const handleMapTouchStart = useCallback(() => {
+    setIsManualInteracting(true);
+    if (manualInteractionTimer.current) clearTimeout(manualInteractionTimer.current);
+    manualInteractionTimer.current = setTimeout(() => {
+      setIsManualInteracting(false);
+    }, 8000); // Wait 8 seconds before resuming auto-follow
+  }, []);
+
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>("loading");
   const [vehicleType, setVehicleTypeState] = useState<VehicleType | null>(null);
   const [alertSettings, setAlertSettings] = useState({ enabled: true, sound: true, flash: true });
   const [isAlerting, setIsAlerting] = useState(false);
+  const [isHazardNearby, setIsHazardNearby] = useState(false);
   const lastAlertTime = React.useRef(0);
   const [activeRoute, setActiveRoute] = useState<Coordinate[] | null>(null);
   const [mapMode, setMapMode] = useState<"standard" | "satellite" | "hybrid">("standard");
@@ -166,6 +174,8 @@ export default function HomeScreen() {
   const [adminLoginVisible, setAdminLoginVisible] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [isPickingFromMap, setIsPickingFromMap] = useState(false);
+  const [isManualInteracting, setIsManualInteracting] = useState(false);
+  const manualInteractionTimer = useRef<NodeJS.Timeout | null>(null);
   const [mapSelectionPoint, setMapSelectionPoint] = useState<Coordinate | null>(null);
   const [nearestPathIndex, setNearestPathIndex] = useState(0);
   const mapRef = useRef<any>(null);
@@ -231,7 +241,11 @@ export default function HomeScreen() {
     console.log("Starting route search for:", destination);
 
     try {
-      const start = userLocation || { latitude: 27.7172, longitude: 85.3240 };
+      const start = userLocation;
+      if (!start) {
+        Alert.alert("Location needed", "Please wait for your location to be detected before searching.");
+        return;
+      }
       let endCoords: Coordinate | null = manualCoords || null;
 
       // Robust coordinate detection for recent searches/pasted coords
@@ -295,10 +309,12 @@ export default function HomeScreen() {
         setSearchHistory(newHistory);
         await AsyncStorage.setItem("search_history", JSON.stringify(newHistory));
 
-        // Transition only on success
+        // Transition directly to 3D following (Consolidated)
         setOnboardingStep("done");
         await setOnboardingComplete();
-        setNavigationState("overview");
+        setIsManualInteracting(false);
+        setNavigationState("following");
+        setIsAutoFollowing(true);
         calculateRiskScore(path);
       } else {
         throw new Error("No road route found between these points.");
@@ -313,23 +329,52 @@ export default function HomeScreen() {
   };
 
   const calculateRiskScore = (path: Coordinate[], startIndex: number = 0) => {
-    let potholeCount = 0;
-    // Only check from current position to end
-    const remainingPath = path.slice(startIndex);
+    if (!path || path.length === 0) {
+      setRiskScore("Low");
+      return;
+    }
 
-    remainingPath.forEach(coord => {
-      potholes.forEach(p => {
-        const dist = getDistance(coord, {
-          latitude: typeof p.latitude === 'string' ? parseFloat(p.latitude) : p.latitude,
-          longitude: typeof p.longitude === 'string' ? parseFloat(p.longitude) : p.longitude
+    try {
+      let potholeCount = 0;
+      const remainingPath = path.slice(startIndex);
+      remainingPath.forEach(coord => {
+        if (!coord) return;
+        potholes.forEach(p => {
+          if (!p) return;
+          const dist = getDistance(coord, {
+            latitude: typeof p.latitude === 'string' ? parseFloat(p.latitude) : p.latitude,
+            longitude: typeof p.longitude === 'string' ? parseFloat(p.longitude) : p.longitude
+          });
+          if (dist < 50) potholeCount++;
         });
-        if (dist < 50) potholeCount++;
       });
-    });
 
-    if (potholeCount > 10) setRiskScore("High");
-    else if (potholeCount > 3) setRiskScore("Medium");
-    else setRiskScore("Low");
+      if (potholeCount > 10) setRiskScore("High");
+      else if (potholeCount > 3) setRiskScore("Medium");
+      else setRiskScore("Low");
+    } catch (e) {
+      console.error("Risk score calculation failed:", e);
+      setRiskScore("Low");
+    }
+  };
+
+  const handleCancelTrip = () => {
+    setActiveRoute(null);
+    setNavigationState("none");
+    setIsAutoFollowing(false);
+    setDestinationName("");
+    setIsHazardNearby(false); // Stop any active alerts immediately
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // Reset camera to 'Home' View (Standard 3D)
+    if (userLocation && mapRef.current) {
+      mapRef.current.animateCamera({
+        center: userLocation,
+        pitch: 65,
+        zoom: 18.2,
+        heading: 0
+      }, { duration: 1000 });
+    }
   };
 
   const handleRefresh = useCallback(async () => {
@@ -348,14 +393,14 @@ export default function HomeScreen() {
 
   // Periodic Hazards Sync & Dynamic Risk Score
   useEffect(() => {
-    if (onboardingStep === "done" && navigationState !== "none") {
+    if (onboardingStep === "done") {
       const interval = setInterval(() => {
         console.log("Auto-sync: Refreshing hazards...");
         handleRefresh();
-      }, 30000); // 30 second sync
+      }, 10000); // 10 second cloud sync
       return () => clearInterval(interval);
     }
-  }, [onboardingStep, navigationState, handleRefresh]);
+  }, [onboardingStep, handleRefresh]);
 
   useEffect(() => {
     if (activeRoute && potholes.length >= 0) {
@@ -377,56 +422,65 @@ export default function HomeScreen() {
   };
 
   const requestLocation = useCallback(async () => {
-    if (!userLocation) {
-      setIsLoadingLocation(true);
-    }
+    setIsLoadingLocation(true);
+    setIsManualInteracting(false);
+
+    // 5-second timeout safety
+    const timeoutId = setTimeout(() => {
+      setIsLoadingLocation(false);
+    }, 5000);
+
     try {
       if (Platform.OS === "web") {
         if ("geolocation" in navigator) {
           navigator.geolocation.getCurrentPosition(
             (position) => {
-              setUserLocation({
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude,
-              });
-              setLocationPermission(true);
+              clearTimeout(timeoutId);
+              const pos = { latitude: position.coords.latitude, longitude: position.coords.longitude };
+              setUserLocation(pos);
               setIsLoadingLocation(false);
             },
-            (() => {
-              setUserLocation({ latitude: 27.7172, longitude: 85.3240 });
-              setLocationPermission(false);
+            () => {
+              clearTimeout(timeoutId);
               setIsLoadingLocation(false);
-            }),
-            { timeout: 10000, enableHighAccuracy: true }
+            }
           );
-        } else {
-          setUserLocation({ latitude: 27.7172, longitude: 85.3240 });
-          setLocationPermission(false);
-          setIsLoadingLocation(false);
         }
       } else {
         const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === "granted") {
-          setLocationPermission(true);
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          setUserLocation({
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
-          });
-        } else {
-          setLocationPermission(false);
-          setUserLocation({ latitude: 27.7172, longitude: 85.3240 });
+        if (status !== "granted") {
+          Alert.alert("Permission Denied", "We need location access to show you on the map.");
+          setIsLoadingLocation(false);
+          clearTimeout(timeoutId);
+          return;
+        }
+
+        // 1. Instant Response: Use Last Known (Max Snap)
+        const lastLoc = await Location.getLastKnownPositionAsync();
+        if (lastLoc) {
+          const lastPos = { latitude: lastLoc.coords.latitude, longitude: lastLoc.coords.longitude };
+          setUserLocation(lastPos);
+          // 🔍 MAX ZOOM: Push to the absolute limit
+          mapRef.current?.animateCamera({ center: lastPos, zoom: 19.0, pitch: 75, heading: 0 }, { duration: 600 });
+        }
+
+        // 2. High Accuracy Update (Deep Max)
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        clearTimeout(timeoutId);
+        if (pos) {
+          const newPos = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+          setUserLocation(newPos);
+          // 🔍 MAX ZOOM: Absolute Detail
+          mapRef.current?.animateCamera({ center: newPos, zoom: 19.0, pitch: 75, heading: 0 }, { duration: 800 });
         }
         setIsLoadingLocation(false);
       }
-    } catch {
-      setUserLocation({ latitude: 27.7172, longitude: 85.3240 });
-      setLocationPermission(false);
+    } catch (e) {
+      console.error(e);
       setIsLoadingLocation(false);
+      clearTimeout(timeoutId);
     }
-  }, []);
+  }, [mapRef.current]);
 
   // Real-time location watcher
   useEffect(() => {
@@ -478,32 +532,17 @@ export default function HomeScreen() {
   }, []);
 
   // Initial Route Zoom Effect: Fit to whole path when route is first loaded
+  /* 
+     Overview feature removed to favor instant 3D navigation as requested by user.
+     Direct transition now happens in handleRouteSelect.
+  */
+
+  // Dynamic Road-Following now handled internally by WebViewMap Voyager 2.0
+  // React side only calculates risk score and alerts.
   useEffect(() => {
-    if (onboardingStep === "done" && activeRoute && mapRef.current && navigationState === "overview" && Platform.OS !== "web") {
-      console.log("Nav: Overview Zoom - Fitting to whole route");
-
-      mapRef.current.fitToCoordinates(activeRoute, {
-        edgePadding: MAP_CONFIG.OVERVIEW_PADDING,
-        animated: true,
-      });
-
-      // Stay in overview for 3 seconds, then switch to following
-      const timer = setTimeout(() => {
-        setNavigationState("following");
-        setIsAutoFollowing(true);
-      }, 3500);
-
-      return () => clearTimeout(timer);
-    }
-  }, [onboardingStep, !!activeRoute, navigationState]);
-
-  // Smoothed Follow Effect (Google Maps style)
-  useEffect(() => {
-    if (navigationState === "following" && activeRoute && userLocation && mapRef.current && Platform.OS !== "web") {
-      // 1. Find the nearest point on the path
+    if (navigationState === "following" && activeRoute && userLocation) {
       let minDistance = Infinity;
       let nearestIndex = 0;
-
       for (let i = 0; i < activeRoute.length; i++) {
         const dist = getDistance(userLocation, activeRoute[i]);
         if (dist < minDistance) {
@@ -512,33 +551,8 @@ export default function HomeScreen() {
         }
       }
       setNearestPathIndex(nearestIndex);
-
-      // 2. Lookahead logic: Find a point ~35m ahead for more stable predictive bearing
-      let lookaheadDistance = 0;
-      let lookaheadIndex = nearestIndex;
-      const TARGET_LOOKAHEAD = 35; // Increased for stability
-
-      for (let i = nearestIndex; i < activeRoute.length - 1; i++) {
-        lookaheadDistance += getDistance(activeRoute[i], activeRoute[i + 1]);
-        lookaheadIndex = i + 1;
-        if (lookaheadDistance >= TARGET_LOOKAHEAD) break;
-      }
-
-      const targetPoint = activeRoute[lookaheadIndex];
-      const heading = calculateBearing(userLocation, targetPoint);
-
-      // 3. Professional Camera Animation (Heading-Up with Offset)
-      // Center the camera on a point 40m ahead of the user to keep the user in lower 1/3
-      const cameraCenter = getPointAtDistance(userLocation, 40, heading);
-
-      mapRef.current.animateCamera({
-        center: cameraCenter,
-        heading: heading,
-        pitch: MAP_CONFIG.PITCH,
-        zoom: MAP_CONFIG.ZOOM,
-      }, { duration: 1000 });
     }
-  }, [userLocation, navigationState, !!activeRoute]);
+  }, [userLocation?.latitude, userLocation?.longitude, navigationState, activeRoute?.length]);
 
   // Proximity Warning Logic
   useEffect(() => {
@@ -549,6 +563,7 @@ export default function HomeScreen() {
     // 4. User is actively navigating (navigationState !== 'none' and has route)
     if (!alertSettings.enabled || !userLocation || potholes.length === 0 ||
       onboardingStep !== "done" || navigationState === "none" || !activeRoute) {
+      if (isHazardNearby) setIsHazardNearby(false);
       return;
     }
 
@@ -573,24 +588,41 @@ export default function HomeScreen() {
       return true; // If no route, alert based on radius only
     });
 
-    if (nearby.length > 0) {
-      const now = Date.now();
-      // Cooldown to avoid constant alerting (5 seconds)
-      if (now - lastAlertTime.current > 5000) {
-        lastAlertTime.current = now;
-
-        if (alertSettings.flash) {
-          setIsAlerting(true);
-          setTimeout(() => setIsAlerting(false), 2000);
-        }
-
-        if (alertSettings.sound && Platform.OS !== "web") {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          speakAlert(nearby.length > 1 ? "Multiple potholes ahead" : "Pothole ahead");
-        }
-      }
+    const isNearby = nearby.length > 0;
+    if (isNearby !== isHazardNearby) {
+      setIsHazardNearby(isNearby);
     }
   }, [userLocation, potholes, alertSettings, vehicleType, onboardingStep, navigationState, !!activeRoute]);
+
+  // Flash Alert Animation (2s loop: 1s on, 1s off)
+  useEffect(() => {
+    let interval: any;
+    if (isHazardNearby && alertSettings.flash && alertSettings.enabled) {
+      interval = setInterval(() => {
+        setIsAlerting(prev => !prev);
+      }, 1500);
+    } else {
+      setIsAlerting(false);
+    }
+    return () => clearInterval(interval);
+  }, [isHazardNearby, alertSettings.flash, alertSettings.enabled]);
+
+  // Periodic Audio Alert (5s interval)
+  useEffect(() => {
+    let interval: any;
+    if (isHazardNearby && alertSettings.sound && alertSettings.enabled) {
+      const triggerAlert = () => {
+        if (Platform.OS !== "web") {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        }
+        speakAlert("Pothole ahead");
+      };
+
+      triggerAlert(); // Initial alert
+      interval = setInterval(triggerAlert, 8000);
+    }
+    return () => clearInterval(interval);
+  }, [isHazardNearby, alertSettings.sound, alertSettings.enabled]);
 
   const handleAddPothole = async () => {
     if (Platform.OS !== "web") {
@@ -875,8 +907,8 @@ export default function HomeScreen() {
             ref={mapRef}
             userLocation={userLocation}
             initialRegion={{
-              latitude: userLocation?.latitude ?? 27.7172,
-              longitude: userLocation?.longitude ?? 85.3240,
+              latitude: userLocation?.latitude || 0,
+              longitude: userLocation?.longitude || 0,
               latitudeDelta: MAP_CONFIG.HOME_LAT_DELTA,
               longitudeDelta: MAP_CONFIG.HOME_LAT_DELTA,
             }}
@@ -907,7 +939,10 @@ export default function HomeScreen() {
             route={activeRoute}
             isOffline={isOffline}
             selectionMarker={mapSelectionPoint}
+            destinationMarker={activeRoute ? activeRoute[activeRoute.length - 1] : null}
+            isAutoFollowing={isAutoFollowing}
             mapType={mapMode}
+            onMapTouchStart={handleMapTouchStart}
           />
 
           {isPickingFromMap && (
@@ -1008,6 +1043,14 @@ export default function HomeScreen() {
                   <Ionicons name={activeRoute ? "map-outline" : "search"} size={18} color={Colors.primary} />
                   <Text style={styles.routeBtnText}>{activeRoute ? "Edit Route" : "Search"}</Text>
                 </Pressable>
+                {activeRoute && (
+                  <Pressable 
+                    onPress={handleCancelTrip} 
+                    style={[styles.routeBtn, { backgroundColor: Colors.error + '20' }]}
+                  >
+                    <Ionicons name="close" size={18} color={Colors.error} />
+                  </Pressable>
+                )}
               </View>
               <Pressable onPress={handleChangeVehicle} style={styles.vehicleChip}>
                 <Ionicons name="car-outline" size={18} color={Colors.textLight} />

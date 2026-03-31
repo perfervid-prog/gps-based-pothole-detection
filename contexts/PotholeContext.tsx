@@ -54,9 +54,10 @@ export function PotholeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearAll = useCallback(async () => {
-    await clearAllPotholes();
+    // Pass current potholes to the storage for remote deletion
+    await clearAllPotholes(potholes);
     setPotholes([]);
-  }, []);
+  }, [potholes]);
 
   const loginAdmin = useCallback((password: string) => {
     // Simple hardcoded password for now

@@ -31,13 +31,16 @@ interface MapViewWrapperProps {
   route?: Coordinate[] | null;
   isOffline?: boolean;
   selectionMarker?: Coordinate | null;
+  destinationMarker?: Coordinate | null;
   mapType?: "standard" | "satellite" | "hybrid" | "terrain";
+  onMapTouchStart?: () => void;
+  isAutoFollowing?: boolean;
 }
 
 export const MapViewWrapper = forwardRef<any, MapViewWrapperProps>(
-  ({ initialRegion, showsUserLocation, userLocation, markers, onMarkerPress, onMapPress, route, isOffline, selectionMarker, mapType = "standard" }, ref) => {
+  ({ initialRegion, showsUserLocation, userLocation, markers, onMarkerPress, onMapPress, route, isOffline, selectionMarker, destinationMarker, mapType = "standard", onMapTouchStart, isAutoFollowing }, ref) => {
 
-    // NATIVE ANDROID FALLBACK: Bypass Google Maps SDK and fake API Key completely using Leaflet WebView
+    // PREFER 3D WEB ENGINE ON ANDROID (NO BILLING/NO API KEY REQUIRED)
     if (Platform.OS === "android") {
       return (
         <WebViewMap
@@ -53,12 +56,15 @@ export const MapViewWrapper = forwardRef<any, MapViewWrapperProps>(
           route={route}
           userLocation={userLocation}
           selectionMarker={selectionMarker}
+          destinationMarker={destinationMarker}
+          isAutoFollowing={isAutoFollowing}
           mapType={mapType}
+          onMapTouchStart={onMapTouchStart}
         />
       );
     }
 
-    // IOS NATIVE MAPKIT (Uses Apple Maps natively, no API key needed, extremely fast)
+    // IOS NATIVE MAPKIT (Uses Apple Maps natively, no API key needed, extremely fast 3D)
     return (
       <MapView
         ref={ref}
@@ -66,8 +72,23 @@ export const MapViewWrapper = forwardRef<any, MapViewWrapperProps>(
         initialRegion={initialRegion}
         showsUserLocation={showsUserLocation}
         showsMyLocationButton={false}
-        showsCompass={false}
+        showsCompass={true}
         mapType={mapType}
+        pitchEnabled={true}
+        showsBuildings={true}
+        onMapReady={() => {
+          // Smooth Native 3D Swoop
+          if (ref && 'current' in ref && ref.current) {
+            ref.current.animateCamera({
+              pitch: 65,
+              center: {
+                latitude: initialRegion.latitude,
+                longitude: initialRegion.longitude,
+              },
+              zoom: 17
+            }, { duration: 2500 });
+          }
+        }}
         onPress={(e) => {
           if (onMapPress) onMapPress(e.nativeEvent.coordinate);
         }}
@@ -89,7 +110,7 @@ export const MapViewWrapper = forwardRef<any, MapViewWrapperProps>(
           <>
             <Polyline
               coordinates={route}
-              strokeColor={Colors.accent}
+              strokeColor={"#2563EB"}
               strokeWidth={6}
             />
             <Marker

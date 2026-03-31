@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -7,16 +7,18 @@ import {
   Alert,
   ScrollView,
   Platform,
+  TextInput,
+  ActivityIndicator,
+  Switch,
+  DevSettings
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons, MaterialIcons, Feather } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { usePotholes } from "@/contexts/PotholeContext";
-import { Pothole } from "@/lib/storage";
+import { Pothole, PROJECT_ID, getSensorStatus } from "@/lib/storage";
 import { resetOnboarding, getAlertSettings, setAlertSetting } from "@/lib/onboarding";
-import { DevSettings, Switch } from "react-native";
-import { useEffect } from "react";
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -81,7 +83,7 @@ function PotholeListItem({
   const handleDelete = () => {
     Alert.alert(
       "Delete Pothole",
-      `Remove pothole at ${pothole.latitude.toFixed(5)}, ${pothole.longitude.toFixed(5)}?`,
+      `Remove pothole at ${parseFloat(pothole.latitude).toFixed(5)}, ${parseFloat(pothole.longitude).toFixed(5)}?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -107,11 +109,11 @@ function PotholeListItem({
         <View style={styles.potholeCoords}>
           <View style={styles.coordRow}>
             <Text style={styles.coordLabel}>Lat</Text>
-            <Text style={styles.coordValue}>{pothole.latitude.toFixed(6)}</Text>
+            <Text style={styles.coordValue}>{parseFloat(pothole.latitude).toFixed(6)}</Text>
           </View>
           <View style={styles.coordRow}>
             <Text style={styles.coordLabel}>Lng</Text>
-            <Text style={styles.coordValue}>{pothole.longitude.toFixed(6)}</Text>
+            <Text style={styles.coordValue}>{parseFloat(pothole.longitude).toFixed(6)}</Text>
           </View>
         </View>
         <Pressable
@@ -132,14 +134,95 @@ function PotholeListItem({
 
 export default function SettingsView({ onClose }: SettingsViewProps) {
   const insets = useSafeAreaInsets();
-  const { potholes, clearAll, removePothole } = usePotholes();
-  const webBottom = Platform.OS === "web" ? 34 : 0;
+  const { potholes, clearAll, removePothole, isAdmin, loginAdmin } = usePotholes();
   const [showPotholeList, setShowPotholeList] = useState(false);
   const [alertSettings, setAlertSettings] = useState({ enabled: true, sound: true, flash: true });
+  
+  // Hardware Sync State
+  const [hardwareStatus, setHardwareStatus] = useState<"searching" | "found" | "error" | "synced" | "online">("searching");
+  const [lastSeen, setLastSeen] = useState<string | null>(null);
+  const [ssid, setSsid] = useState("HAWA 4.0");
+  const [password, setPassword] = useState("10000011");
+  const [isSyncing, setIsSyncing] = useState(false);
+  const pollInterval = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     loadSettings();
+    startPolling();
+    return () => stopPolling();
   }, []);
+
+  const startPolling = () => {
+    if (pollInterval.current) return;
+    
+    // Initial check
+    checkCloudHeartbeat();
+    
+    pollInterval.current = setInterval(async () => {
+      // 1. Try Local Hub (Setup Mode)
+      try {
+        const response = await fetch("http://192.168.4.1/handshake", { method: "GET" });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.device === "pothole-sensor") {
+            setHardwareStatus("found");
+            return;
+          }
+        }
+      } catch (e) {
+        // Fallback to Cloud Heartbeat
+        checkCloudHeartbeat();
+      }
+    }, 30000); // 30s poll
+  };
+
+  const checkCloudHeartbeat = async () => {
+    const status = await getSensorStatus();
+    if (status && status.lastSeen) {
+      const lastSeenDate = new Date(status.lastSeen).getTime();
+      const now = new Date().getTime();
+      // If seen in the last 3 minutes
+      if (now - lastSeenDate < 180000) {
+        setHardwareStatus("online");
+        setLastSeen(status.lastSeen);
+      }
+    }
+  };
+
+  const stopPolling = () => {
+    if (pollInterval.current) {
+      clearInterval(pollInterval.current);
+      pollInterval.current = null;
+    }
+  };
+
+  const handleSyncHardware = async () => {
+    setIsSyncing(true);
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const response = await fetch("http://192.168.4.1/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ssid: ssid,
+          pass: password,
+          fb: `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/potholes`
+        })
+      });
+
+      if (response.ok) {
+        setHardwareStatus("synced");
+        Alert.alert("Sync Successful", "Sensor updated. It will now reboot and connect to WiFi.");
+      } else {
+        throw new Error("Sync failed");
+      }
+    } catch (error) {
+      Alert.alert("Sync Failed", "Make sure you are connected to the 'Pothole-Sensor' WiFi hotspot.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const loadSettings = async () => {
     const settings = await getAlertSettings();
@@ -156,14 +239,10 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
     }
   };
 
-  const handleClearAll = () => {
-    if (potholes.length === 0) {
-      Alert.alert("No Data", "There are no potholes to delete.");
-      return;
-    }
+  const proceedToClear = () => {
     Alert.alert(
-      "Clear All Potholes",
-      `Are you sure you want to delete all ${potholes.length} pothole(s)? This action cannot be undone.`,
+      "Confirm Bulk Delete",
+      `Are you sure? This will delete all ${potholes.length} potholes from BOTH your device and the server.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -179,6 +258,35 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
         },
       ]
     );
+  };
+
+  const handleClearAll = () => {
+    if (potholes.length === 0) {
+      Alert.alert("No Data", "There are no potholes to delete.");
+      return;
+    }
+
+    if (!isAdmin) {
+      if (Platform.OS === 'web') {
+          const pass = window.prompt("Admin Password Required:");
+          if (loginAdmin(pass || "")) {
+            proceedToClear();
+          } else if (pass !== null) {
+            alert("Incorrect password.");
+          }
+      } else {
+          Alert.alert(
+            "Admin Login Required",
+            "Please authenticate as an admin first to use this feature.",
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "How to Login?", onPress: () => Alert.alert("Admin Login", "For Android, please use the iOS version or contact support to manage bulk data.") }
+            ]
+          );
+      }
+    } else {
+      proceedToClear();
+    }
   };
 
   const handleDeletePothole = async (id: string) => {
@@ -202,7 +310,6 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
             if (Platform.OS === "web") {
               window.location.reload();
             } else {
-              // DevSettings.reload() only works in development
               try {
                 DevSettings.reload();
               } catch (e) {
@@ -227,8 +334,72 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
 
       <ScrollView
         style={styles.content}
-        contentContainerStyle={{ paddingBottom: insets.bottom + webBottom + 24 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
       >
+        <Text style={styles.sectionTitle}>Hardware Optimization</Text>
+        <View style={styles.section}>
+          <View style={styles.hardwareCard}>
+            <View style={styles.statusHeader}>
+              <View style={[styles.statusDot, { backgroundColor: (hardwareStatus === "found" || hardwareStatus === "synced" || hardwareStatus === "online") ? "#10B981" : "#F59E0B" }]} />
+              <View style={styles.statusContent}>
+                <Text style={styles.statusText}>
+                  {hardwareStatus === "searching" && "Searching for Pothole Sensor..."}
+                  {hardwareStatus === "found" && "Sensor Hub Found! Connect to WiFi"}
+                  {hardwareStatus === "synced" && "Hardware Synced & Connected"}
+                  {hardwareStatus === "online" && "Sensor Online (Cloud)"}
+                </Text>
+                {hardwareStatus === "online" && lastSeen && (
+                  <Text style={styles.statusSubtitle}>Last Seen: {new Date(lastSeen).toLocaleTimeString()}</Text>
+                )}
+              </View>
+              {hardwareStatus === "searching" && <ActivityIndicator size="small" color={Colors.textSecondary} />}
+            </View>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Local WiFi Network</Text>
+              <TextInput
+                style={styles.input}
+                value={ssid}
+                onChangeText={setSsid}
+                placeholder="WiFi Name"
+                placeholderTextColor={Colors.textSecondary}
+              />
+              <Text style={styles.inputLabel}>WiFi Password</Text>
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="WiFi Password"
+                secureTextEntry
+                placeholderTextColor={Colors.textSecondary}
+              />
+            </View>
+
+            <Pressable
+              onPress={handleSyncHardware}
+              disabled={hardwareStatus !== "found" || isSyncing}
+              style={({ pressed }) => [
+                styles.syncButton,
+                (hardwareStatus !== "found" || isSyncing) && styles.syncButtonDisabled,
+                pressed && { opacity: 0.8 }
+              ]}
+            >
+              {isSyncing ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="sync" size={20} color="#FFF" />
+                  <Text style={styles.syncButtonText}>Sync Config to Sensor</Text>
+                </>
+              )}
+            </Pressable>
+            
+            {hardwareStatus === "searching" && (
+              <Text style={styles.helpText}>Connect your phone to the 'Pothole-Sensor-XXXX' WiFi network to begin syncing.</Text>
+            )}
+          </View>
+        </View>
+
         <Text style={styles.sectionTitle}>Data</Text>
         <View style={styles.section}>
           <SettingRow
@@ -332,21 +503,6 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
             </>
           )}
         </View>
-
-        <Text style={styles.sectionTitle}>About</Text>
-        <View style={styles.section}>
-          <SettingRow
-            icon={<Ionicons name="information-circle-outline" size={22} color={Colors.primary} />}
-            label="Version"
-            subtitle="1.0.0"
-          />
-          <View style={styles.separator} />
-          <SettingRow
-            icon={<Ionicons name="shield-checkmark-outline" size={22} color={Colors.primary} />}
-            label="Location Data"
-            subtitle="Stored locally on device"
-          />
-        </View>
       </ScrollView>
     </View>
   );
@@ -367,7 +523,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: "700" as const,
+    fontWeight: "700",
     color: Colors.textLight,
   },
   content: {
@@ -376,9 +532,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 13,
-    fontWeight: "600" as const,
+    fontWeight: "600",
     color: Colors.textSecondary,
-    textTransform: "uppercase" as const,
+    textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 8,
     marginLeft: 4,
@@ -388,6 +544,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderRadius: 16,
     overflow: "hidden",
+    marginBottom: 16,
   },
   settingRow: {
     flexDirection: "row",
@@ -409,7 +566,7 @@ const styles = StyleSheet.create({
   },
   settingLabel: {
     fontSize: 16,
-    fontWeight: "500" as const,
+    fontWeight: "500",
     color: Colors.textPrimary,
   },
   settingSubtitle: {
@@ -420,6 +577,73 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: Colors.divider,
     marginLeft: 62,
+  },
+  hardwareCard: {
+    padding: 16,
+    gap: 16,
+  },
+  statusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: Colors.background,
+    padding: 10,
+    borderRadius: 10,
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: Colors.textPrimary,
+    flex: 1,
+  },
+  inputGroup: {
+    gap: 8,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: Colors.textSecondary,
+    marginLeft: 4,
+  },
+  input: {
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: Colors.textPrimary,
+    borderWidth: 1,
+    borderColor: Colors.divider,
+  },
+  syncButton: {
+    backgroundColor: Colors.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  syncButtonDisabled: {
+    backgroundColor: Colors.textSecondary,
+    opacity: 0.5,
+  },
+  syncButtonText: {
+    color: "#FFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  helpText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    textAlign: "center",
+    fontStyle: "italic",
+    lineHeight: 18,
   },
   potholeListContainer: {
     backgroundColor: Colors.background,
@@ -445,7 +669,7 @@ const styles = StyleSheet.create({
   },
   potholeIndexText: {
     fontSize: 13,
-    fontWeight: "700" as const,
+    fontWeight: "700",
     color: Colors.textLight,
   },
   potholeCoords: {
@@ -459,13 +683,13 @@ const styles = StyleSheet.create({
   },
   coordLabel: {
     fontSize: 12,
-    fontWeight: "600" as const,
+    fontWeight: "600",
     color: Colors.textSecondary,
     width: 28,
   },
   coordValue: {
     fontSize: 14,
-    fontWeight: "500" as const,
+    fontWeight: "500",
     color: Colors.textPrimary,
   },
   deleteButton: {

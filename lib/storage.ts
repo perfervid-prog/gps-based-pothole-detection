@@ -1,8 +1,8 @@
 import * as Crypto from "expo-crypto";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const PROJECT_ID = "pothole-alert-f0058";
-const FIREBASE_REST_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/potholes`;
+export const PROJECT_ID = "pothole-alert-f0058";
+export const FIREBASE_REST_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/potholes`;
 const CACHE_KEY = "@potholes_cache";
 
 export interface Pothole {
@@ -180,6 +180,38 @@ export async function deletePothole(id: string): Promise<boolean> {
   }
 }
 
-export async function clearAllPotholes(): Promise<void> {
+export interface SensorStatus {
+  lastSeen: string;
+  status: string;
+  firmware: string;
+}
+
+export async function getSensorStatus(): Promise<SensorStatus | null> {
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/status/esp32_01`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const doc = await response.json();
+    return {
+      lastSeen: doc.fields.lastSeen?.stringValue || "",
+      status: doc.fields.status?.stringValue || "unknown",
+      firmware: doc.fields.firmware?.stringValue || "0.0.0",
+    };
+  } catch (error) {
+    console.log("Failed to fetch sensor status from cloud");
+    return null;
+  }
+}
+
+export async function clearAllPotholes(potholes: Pothole[]): Promise<void> {
+  // 1. Remove local cache
   await AsyncStorage.removeItem(CACHE_KEY);
+
+  // 2. Remove from Firebase server
+  const deletePromises = potholes.map(p => {
+    const url = `${FIREBASE_REST_URL}/${p.id}`;
+    return fetch(url, { method: "DELETE" }).catch(e => console.log("Delete error for", p.id, e));
+  });
+
+  await Promise.all(deletePromises);
 }
