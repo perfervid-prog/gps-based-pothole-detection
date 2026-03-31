@@ -212,21 +212,27 @@ const mapHtml = `
             if (!activeRoute || activeRoute.length < 2) return point;
             let minD = Infinity;
             let closer = point;
+            let nearestIdx = 0;
             
             for (let i = 0; i < activeRoute.length - 1; i++) {
                 const segStart = activeRoute[i];
-                const segEnd = activeRoute[i+1];
-                
-                // Simple linear approximation for snapping
-                const t = 0.5; // Snap to segment midpoint or find actual projection
-                // For a professional feel, we just find the closest vertex if distance < 25m
                 const d = getDistance(point, segStart);
                 if (d < minD) {
                     minD = d;
                     closer = segStart;
+                    nearestIdx = i;
                 }
             }
-            return minD < 25 ? closer : point;
+
+            if (minD < 25) {
+                // 🔥 LANE-PRECISION: Offset 2m to the LEFT (Nepal Driving Side)
+                const nextPoint = activeRoute[nearestIdx + 1] || activeRoute[nearestIdx];
+                const bearing = calculateBearing(activeRoute[nearestIdx], nextPoint);
+                // Offset 90 degrees to the left
+                const laneBearing = (bearing - 90 + 360) % 360;
+                return getPointAtDistance(closer, 2.5, laneBearing); // 2.5m for lane center
+            }
+            return point;
         };
 
         function handleMessage(event) {
