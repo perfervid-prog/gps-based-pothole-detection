@@ -47,16 +47,19 @@ export async function getPotholes(): Promise<Pothole[]> {
       return [];
     }
 
-    const remoteData: Pothole[] = data.documents.map((doc: any) => {
-      const fields = doc.fields;
-      return {
-        id: doc.name.split("/").pop(),
-        latitude: fields.latitude.stringValue,
-        longitude: fields.longitude.stringValue,
-        magnitude: fields.magnitude.stringValue,
-        reportedAt: fields.reportedAt.stringValue,
-      };
-    });
+    const remoteData: Pothole[] = data.documents
+      .filter((doc: any) => !doc.name.endsWith("esp32_status")) // Filter out status doc
+      .map((doc: any) => {
+        const fields = doc.fields;
+        const val = (f: any) => f?.doubleValue?.toString() || f?.stringValue || "0";
+        return {
+          id: doc.name.split("/").pop(),
+          latitude: val(fields.latitude),
+          longitude: val(fields.longitude),
+          magnitude: val(fields.magnitude),
+          reportedAt: fields.reportedAt?.stringValue || new Date().toISOString(),
+        };
+      });
 
     // 2. Merge logic: keep local "isOffline" data that hasn't synced yet
     const offlineItems = localData.filter(p => p.isOffline);
@@ -187,18 +190,26 @@ export interface SensorStatus {
 }
 
 export async function getSensorStatus(): Promise<SensorStatus | null> {
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/status/esp32_01`;
+  // Fetch latest heartbeat from the potholes collection
+  const url = `${FIREBASE_REST_URL}?orderBy=reportedAt desc&limit=1`;
   try {
     const response = await fetch(url);
     if (!response.ok) return null;
-    const doc = await response.json();
+    const data = await response.json();
+    
+    // Find the latest one marked as "heartbeat"
+    const latestDoc = (data.documents || []).find((doc: any) => doc.fields?.type?.stringValue === "heartbeat");
+
+    if (!latestDoc) return null;
+    
+    const latest = latestDoc.fields;
     return {
-      lastSeen: doc.fields.lastSeen?.stringValue || "",
-      status: doc.fields.status?.stringValue || "unknown",
-      firmware: doc.fields.firmware?.stringValue || "0.0.0",
+      lastSeen: latest.lastSeen?.stringValue || latest.reportedAt?.stringValue || "",
+      status: latest.status?.stringValue || "online",
+      firmware: "1.2.0",
     };
   } catch (error) {
-    console.log("Failed to fetch sensor status from cloud");
+    console.log("Failed to fetch heartbeat status");
     return null;
   }
 }

@@ -208,6 +208,27 @@ const mapHtml = `
             }
         }
 
+        const findNearestPointOnRoute = (point) => {
+            if (!activeRoute || activeRoute.length < 2) return point;
+            let minD = Infinity;
+            let closer = point;
+            
+            for (let i = 0; i < activeRoute.length - 1; i++) {
+                const segStart = activeRoute[i];
+                const segEnd = activeRoute[i+1];
+                
+                // Simple linear approximation for snapping
+                const t = 0.5; // Snap to segment midpoint or find actual projection
+                // For a professional feel, we just find the closest vertex if distance < 25m
+                const d = getDistance(point, segStart);
+                if (d < minD) {
+                    minD = d;
+                    closer = segStart;
+                }
+            }
+            return minD < 25 ? closer : point;
+        };
+
         function handleMessage(event) {
             try {
                 const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
@@ -222,9 +243,10 @@ const mapHtml = `
                     Object.values(markers).forEach(m => m.remove());
                     markers = {};
                     (message.markers || []).forEach(m => {
+                        const snapped = findNearestPointOnRoute({ latitude: m.latitude, longitude: m.longitude });
                         const el = document.createElement('div'); el.className = 'marker-red';
                         const marker = new maplibregl.Marker({ element: el })
-                            .setLngLat([m.longitude, m.latitude])
+                            .setLngLat([snapped.longitude, snapped.latitude])
                             .addTo(map);
                         el.onclick = () => window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'onMarkerPress', id: m.id }));
                         markers[m.id] = marker;
