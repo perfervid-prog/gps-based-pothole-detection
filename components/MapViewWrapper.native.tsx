@@ -85,7 +85,7 @@ export const MapViewWrapper = forwardRef<any, MapViewWrapperProps>(
                 latitude: initialRegion.latitude,
                 longitude: initialRegion.longitude,
               },
-              zoom: 17
+              zoom: 19.0
             }, { duration: 2500 });
           }
         }}

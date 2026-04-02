@@ -26,6 +26,7 @@ export default function AdminLoginModal({
     onLogin,
 }: AdminLoginModalProps) {
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
 
     const handleLogin = () => {
         if (!password) return;
@@ -82,16 +83,29 @@ export default function AdminLoginModal({
 
                     <View style={styles.inputGroup}>
                         <Text style={styles.label}>Password</Text>
-                        <TextInput
-                            style={styles.input}
-                            value={password}
-                            onChangeText={setPassword}
-                            placeholder="••••••••"
-                            placeholderTextColor={Colors.textSecondary}
-                            secureTextEntry
-                            autoFocus
-                            onSubmitEditing={handleLogin}
-                        />
+                        <View style={styles.inputContainer}>
+                            <TextInput
+                                style={styles.input}
+                                value={password}
+                                onChangeText={setPassword}
+                                placeholder="••••••••"
+                                placeholderTextColor={Colors.textSecondary}
+                                secureTextEntry={!showPassword}
+                                autoFocus
+                                onSubmitEditing={handleLogin}
+                            />
+                            <Pressable 
+                                onPress={() => setShowPassword(!showPassword)}
+                                style={styles.eyeBtn}
+                                hitSlop={10}
+                            >
+                                <Ionicons 
+                                    name={showPassword ? "eye-outline" : "eye-off-outline"} 
+                                    size={20} 
+                                    color="rgba(255, 255, 255, 0.7)"
+                                />
+                            </Pressable>
+                        </View>
                     </View>
 
                     <Pressable
@@ -167,15 +181,24 @@ const styles = StyleSheet.create({
         textTransform: "uppercase" as const,
         letterSpacing: 1,
     },
-    input: {
+    inputContainer: {
+        flexDirection: "row",
+        alignItems: "center",
         backgroundColor: "rgba(255,255,255,0.15)",
         borderRadius: 16,
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.1)",
         paddingHorizontal: 16,
+    },
+    input: {
+        flex: 1,
         paddingVertical: 14,
         fontSize: 16,
         color: Colors.textLight,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.1)",
+    },
+    eyeBtn: {
+        padding: 4,
+        marginLeft: 8,
     },
     loginButton: {
         backgroundColor: Colors.surface,

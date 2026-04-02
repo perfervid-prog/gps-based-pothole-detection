@@ -209,8 +209,48 @@ export async function getSensorStatus(): Promise<SensorStatus | null> {
       firmware: "1.2.0",
     };
   } catch (error) {
-    console.log("Failed to fetch heartbeat status");
+    console.log("Failed to fetch sensor status:", error);
     return null;
+  }
+}
+export interface SensorConfig {
+  kZScore: number;
+  xJerkThreshold: number;
+}
+
+export async function getSensorConfig(): Promise<SensorConfig | null> {
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/potholes/sensor_config`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const doc = await response.json();
+    return {
+      kZScore: parseFloat(doc.fields.kZScore?.doubleValue || "4.5"),
+      xJerkThreshold: parseInt(doc.fields.xJerkThreshold?.integerValue || "2500"),
+    };
+  } catch (error) {
+    console.log("Failed to fetch sensor config");
+    return null;
+  }
+}
+
+export async function updateSensorConfig(config: SensorConfig): Promise<boolean> {
+  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/potholes/sensor_config`;
+  try {
+    const response = await fetch(url + "?updateMask.fieldPaths=kZScore&updateMask.fieldPaths=xJerkThreshold", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fields: {
+          kZScore: { doubleValue: config.kZScore },
+          xJerkThreshold: { integerValue: config.xJerkThreshold.toString() },
+        },
+      }),
+    });
+    return response.ok;
+  } catch (error) {
+    console.log("Failed to update sensor config");
+    return false;
   }
 }
 

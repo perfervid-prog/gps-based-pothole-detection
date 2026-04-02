@@ -43,8 +43,8 @@ const FIREBASE_REST_URL = "https://firestore.googleapis.com/v1/projects/pothole-
 // Global Map Configuration (Google Maps style)
 const MAP_CONFIG = {
   PITCH: 75,
-  ZOOM: 20.1,
-  HOME_PITCH: 60,
+  ZOOM: 19.0, // 🔍 MAX ZOOM LEVEL
+  HOME_PITCH: 75, // 📐 Cinematic Pitch
   HOME_LAT_DELTA: 0.005,
   LOOKAHEAD_DISTANCE: 100, // meters
   ANIMATION_DURATION: 1200,
@@ -371,7 +371,7 @@ export default function HomeScreen() {
       mapRef.current.animateCamera({
         center: userLocation,
         pitch: 65,
-        zoom: 18.2,
+        zoom: 19.0,
         heading: 0
       }, { duration: 1000 });
     }
@@ -397,7 +397,7 @@ export default function HomeScreen() {
       const interval = setInterval(() => {
         console.log("Auto-sync: Refreshing hazards...");
         handleRefresh();
-      }, 10000); // 10 second cloud sync
+      }, 2000); // 2 second cloud sync
       return () => clearInterval(interval);
     }
   }, [onboardingStep, handleRefresh]);
@@ -460,7 +460,7 @@ export default function HomeScreen() {
         if (lastLoc) {
           const lastPos = { latitude: lastLoc.coords.latitude, longitude: lastLoc.coords.longitude };
           setUserLocation(lastPos);
-          // 🔍 MAX ZOOM: Push to the absolute limit
+          // 🔍 MAX ZOOM: Synchronized with Navigation View
           mapRef.current?.animateCamera({ center: lastPos, zoom: 19.0, pitch: 75, heading: 0 }, { duration: 600 });
         }
 
@@ -470,7 +470,7 @@ export default function HomeScreen() {
         if (pos) {
           const newPos = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
           setUserLocation(newPos);
-          // 🔍 MAX ZOOM: Absolute Detail
+          // 🔍 MAX ZOOM: Synchronized with Navigation View
           mapRef.current?.animateCamera({ center: newPos, zoom: 19.0, pitch: 75, heading: 0 }, { duration: 800 });
         }
         setIsLoadingLocation(false);
@@ -771,8 +771,8 @@ export default function HomeScreen() {
       mapRef.current.animateCamera({
         center: userLocation,
         heading: heading,
-        pitch: navigationState === "following" ? MAP_CONFIG.PITCH : MAP_CONFIG.HOME_PITCH,
-        zoom: navigationState === "following" ? MAP_CONFIG.ZOOM : 16,
+        pitch: MAP_CONFIG.PITCH, // Always use Navigation Pitch
+        zoom: MAP_CONFIG.ZOOM,   // Always use Navigation Zoom
       }, { duration: 800 });
 
       setIsAutoFollowing(true);
@@ -994,21 +994,17 @@ export default function HomeScreen() {
 
           {Platform.OS !== "web" ? (
             <View style={styles.mapSideButtons}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.mapSideBtn,
-                  pressed && { opacity: 0.7 },
-                ]}
-                onPress={() => {
-                  const modes: ("standard" | "satellite" | "hybrid")[] = ["standard", "satellite", "hybrid"];
-                  const next = modes[(modes.indexOf(mapMode) + 1) % modes.length];
-                  setMapMode(next);
-                  if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }}
-              >
-                <Ionicons name="layers" size={22} color={Colors.primary} />
-              </Pressable>
-
+              {isAdmin && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.mapSideBtn,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                  onPress={handleAddPothole}
+                >
+                  <Ionicons name="add" size={24} color={Colors.primary} />
+                </Pressable>
+              )}
               <Pressable
                 style={({ pressed }) => [
                   styles.mapSideBtn,
@@ -1061,7 +1057,7 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {isAdmin && <FloatingActionButton onPress={handleAddPothole} />}
+
 
       <DrawerMenu
         visible={drawerVisible}
@@ -1131,7 +1127,7 @@ const styles = StyleSheet.create({
   },
   routeHeaderOverlay: {
     position: 'absolute',
-    top: 60,
+    top: 16,
     left: 16,
     right: 16,
     flexDirection: 'row',

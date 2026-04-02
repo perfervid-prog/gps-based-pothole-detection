@@ -43,13 +43,7 @@ export default function RouteSelection({
         onRouteSelect(source, destination, destination);
     };
 
-    const allSuggestions = [
-        { id: "1", icon: "time-outline", title: "Ring Road", subtitle: "Lalitpur" },
-        { id: "2", icon: "star-outline", title: "Thamel", subtitle: "Kathmandu" },
-        { id: "3", icon: "location-outline", title: "Durbar Marg", subtitle: "Kathmandu" },
-        { id: "4", icon: "trail-sign-outline", title: "Baneshwor", subtitle: "Kathmandu" },
-        { id: "5", icon: "business-outline", title: "Patan Durbar Square", subtitle: "Lalitpur" },
-    ];
+    const allSuggestions: { id: string; icon: string; title: string; subtitle: string }[] = [];
 
     const query = destination.trim().toLowerCase();
     const filteredSuggestions = query
@@ -144,9 +138,11 @@ export default function RouteSelection({
                     </View>
                 )}
 
-                <Text style={styles.sectionTitle}>
-                    {destination.trim() ? "Search Results" : "Top Destinations"}
-                </Text>
+                {(destination.trim() !== "" || allSuggestions.length > 0) && (
+                    <Text style={styles.sectionTitle}>
+                        {destination.trim() ? "Search Results" : "Top Destinations"}
+                    </Text>
+                )}
                 {filteredSuggestions.map((item) => (
                     <Pressable
                         key={item.id}

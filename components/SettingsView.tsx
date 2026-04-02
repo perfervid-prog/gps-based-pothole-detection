@@ -10,14 +10,13 @@ import {
   TextInput,
   ActivityIndicator,
   Switch,
-  DevSettings
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { usePotholes } from "@/contexts/PotholeContext";
-import { Pothole, PROJECT_ID, getSensorStatus } from "@/lib/storage";
+import { Pothole, PROJECT_ID, getSensorStatus, getSensorConfig, updateSensorConfig, SensorConfig } from "@/lib/storage";
 import { resetOnboarding, getAlertSettings, setAlertSetting } from "@/lib/onboarding";
 
 interface SettingsViewProps {
@@ -146,11 +145,47 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
   const [isSyncing, setIsSyncing] = useState(false);
   const pollInterval = useRef<NodeJS.Timeout | null>(null);
 
+  const [showWifiPassword, setShowWifiPassword] = useState(false);
+
+  // Sensor Calibration
+  const [calib, setCalib] = useState<SensorConfig>({ kZScore: 4.5, xJerkThreshold: 2500 });
+  const [kZScoreStr, setKZScoreStr] = useState("4.5");
+  const [xJerkThresholdStr, setXJerkThresholdStr] = useState("2500");
+  const [isSavingCalib, setIsSavingCalib] = useState(false);
+
   useEffect(() => {
     loadSettings();
+    loadCalibration();
     startPolling();
     return () => stopPolling();
   }, []);
+
+  const loadCalibration = async () => {
+    const config = await getSensorConfig();
+    if (config) {
+      setCalib(config);
+      setKZScoreStr(config.kZScore.toString());
+      setXJerkThresholdStr(config.xJerkThreshold.toString());
+    }
+  };
+
+  const handleUpdateCalibration = async () => {
+    setIsSavingCalib(true);
+    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    
+    const configToSave: SensorConfig = {
+      kZScore: parseFloat(kZScoreStr) || 4.5,
+      xJerkThreshold: parseInt(xJerkThresholdStr) || 2500,
+    };
+
+    const success = await updateSensorConfig(configToSave);
+    if (success) {
+      Alert.alert("Success", "Sensor brain updated. Changes will take effect on next heartbeat (within 60s).");
+    } else {
+      Alert.alert("Error", "Failed to update cloud configuration.");
+    }
+    setIsSavingCalib(false);
+  };
 
   const startPolling = () => {
     if (pollInterval.current) return;
@@ -274,14 +309,30 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
           } else if (pass !== null) {
             alert("Incorrect password.");
           }
-      } else {
-          Alert.alert(
-            "Admin Login Required",
-            "Please authenticate as an admin first to use this feature.",
+      } else if (Platform.OS === 'ios') {
+          Alert.prompt(
+            "Admin Password Required",
+            "Enter admin password to clear all data.",
             [
               { text: "Cancel", style: "cancel" },
-              { text: "How to Login?", onPress: () => Alert.alert("Admin Login", "For Android, please use the iOS version or contact support to manage bulk data.") }
-            ]
+              {
+                text: "Confirm",
+                onPress: (pass?: string) => {
+                  if (loginAdmin(pass || "")) {
+                    proceedToClear();
+                  } else {
+                    Alert.alert("Access Denied", "Incorrect administrator password.");
+                  }
+                },
+              },
+            ],
+            "secure-text"
+          );
+      } else {
+          Alert.alert(
+            "Admin Required",
+            "Please log in as admin first from the main menu (☰ → Admin Login), then return here to clear data.",
+            [{ text: "OK" }]
           );
       }
     } else {
@@ -310,11 +361,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
             if (Platform.OS === "web") {
               window.location.reload();
             } else {
-              try {
-                DevSettings.reload();
-              } catch (e) {
-                Alert.alert("Success", "Onboarding reset. Please restart the app manually.");
-              }
+              Alert.alert("Success", "Onboarding has been reset. Please close and reopen the app to see the changes.");
             }
           },
         },
@@ -365,14 +412,19 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                 placeholderTextColor={Colors.textSecondary}
               />
               <Text style={styles.inputLabel}>WiFi Password</Text>
-              <TextInput
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="WiFi Password"
-                secureTextEntry
-                placeholderTextColor={Colors.textSecondary}
-              />
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={[styles.input, { flex: 1, borderWidth: 0 }]}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="WiFi Password"
+                  secureTextEntry={!showWifiPassword}
+                  placeholderTextColor={Colors.textSecondary}
+                />
+                <Pressable onPress={() => setShowWifiPassword(!showWifiPassword)} style={styles.wifiEyeBtn}>
+                  <Ionicons name={showWifiPassword ? "eye-outline" : "eye-off-outline"} size={20} color={Colors.textSecondary} />
+                </Pressable>
+              </View>
             </View>
 
             <Pressable
@@ -397,6 +449,57 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
             {hardwareStatus === "searching" && (
               <Text style={styles.helpText}>Connect your phone to the 'Pothole-Sensor-XXXX' WiFi network to begin syncing.</Text>
             )}
+          </View>
+        </View>
+
+        <Text style={styles.sectionTitle}>Sensor Calibration (Math Tuning)</Text>
+        <View style={styles.section}>
+          <View style={styles.hardwareCard}>
+            <View style={styles.inputGroup}>
+              <View style={styles.calibHeader}>
+                <Text style={styles.inputLabel}>Statistical Sensitivity (kZScore)</Text>
+                <Text style={styles.calibVal}>{kZScoreStr || "4.5"}</Text>
+              </View>
+              <Text style={styles.helpText}>Higher = Less sensitive. (4.0 - 6.0 is standard)</Text>
+              <TextInput
+                style={styles.input}
+                value={kZScoreStr}
+                keyboardType="numeric"
+                onChangeText={setKZScoreStr}
+              />
+              
+              <View style={[styles.calibHeader, { marginTop: 8 }]}>
+                <Text style={styles.inputLabel}>Impact Thud (X-Jerk Threshold)</Text>
+                <Text style={styles.calibVal}>{xJerkThresholdStr || "2500"}</Text>
+              </View>
+              <Text style={styles.helpText}>Force needed to confirm road hit. (1000 - 5000 range)</Text>
+              <TextInput
+                style={styles.input}
+                value={xJerkThresholdStr}
+                keyboardType="numeric"
+                onChangeText={setXJerkThresholdStr}
+              />
+            </View>
+
+            <Pressable
+              onPress={handleUpdateCalibration}
+              disabled={isSavingCalib}
+              style={({ pressed }) => [
+                styles.syncButton,
+                { backgroundColor: Colors.accent },
+                isSavingCalib && styles.syncButtonDisabled,
+                pressed && { opacity: 0.8 }
+              ]}
+            >
+              {isSavingCalib ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <>
+                  <Feather name="cpu" size={20} color="#FFF" />
+                  <Text style={styles.syncButtonText}>Update Sensor Brain (Cloud)</Text>
+                </>
+              )}
+            </Pressable>
           </View>
         </View>
 
@@ -595,11 +698,18 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
   },
+  statusContent: {
+    flex: 1,
+    gap: 2,
+  },
   statusText: {
     fontSize: 14,
     fontWeight: "600",
     color: Colors.textPrimary,
-    flex: 1,
+  },
+  statusSubtitle: {
+    fontSize: 12,
+    color: Colors.textSecondary,
   },
   inputGroup: {
     gap: 8,
@@ -620,6 +730,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.divider,
   },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.divider,
+  },
+  wifiEyeBtn: {
+    padding: 10,
+  },
   syncButton: {
     backgroundColor: Colors.primary,
     flexDirection: "row",
@@ -639,11 +760,24 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   helpText: {
-    fontSize: 12,
+    fontSize: 11,
     color: Colors.textSecondary,
-    textAlign: "center",
     fontStyle: "italic",
-    lineHeight: 18,
+    marginBottom: 2,
+  },
+  calibHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  calibVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.accent,
+    backgroundColor: Colors.background,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   potholeListContainer: {
     backgroundColor: Colors.background,

@@ -91,7 +91,7 @@ const mapHtml = `
             container: 'map',
             style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
             center: [85.3240, 27.7172],
-            zoom: 20.1,
+            zoom: 19.0,
             pitch: 75,
             bearing: 0,
             antialias: true,
@@ -192,7 +192,7 @@ const mapHtml = `
 
             map.flyTo({
                 center: [cameraCenter.longitude, cameraCenter.latitude],
-                zoom: 22.0, // 🔍 MAX ZOOM
+                zoom: 19.0, // 🔍 MAX ZOOM
                 pitch: 75,
                 bearing: heading,
                 duration: 1200,
@@ -238,11 +238,10 @@ const mapHtml = `
         function handleMessage(event) {
             try {
                 const message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-                
-                if (message.type === 'init') {
+                           if (message.type === 'init') {
                     const center = message.userLocation || { latitude: message.region.latitude, longitude: message.region.longitude };
                     if (center && center.latitude !== 0) {
-                        map.jumpTo({ center: [center.longitude, center.latitude], zoom: 20.1, pitch: 75 });
+                        map.jumpTo({ center: [center.longitude, center.latitude], zoom: 19.0, pitch: 75 });
                     }
                 }
                 else if (message.type === 'updateMarkers') {
@@ -266,9 +265,9 @@ const mapHtml = `
                         userMarker = new maplibregl.Marker({ element: el, zIndexOffset: 1000 })
                             .setLngLat([userLocation.longitude, userLocation.latitude])
                             .addTo(map);
-
+ 
                         if (message.isFirst) {
-                            map.flyTo({ center: [userLocation.longitude, userLocation.latitude], zoom: 20.1, pitch: 75, duration: 1500 });
+                            map.flyTo({ center: [userLocation.longitude, userLocation.latitude], zoom: 19.0, pitch: 75, duration: 1500 });
                         }
                     }
                     if (isFollowing) performSmoothFollow();
@@ -276,7 +275,7 @@ const mapHtml = `
                 else if (message.type === 'animateCamera') {
                     map.flyTo({
                         center: [message.center.longitude, message.center.latitude],
-                        zoom: message.zoom || 20.1,
+                        zoom: message.zoom || 19.0,
                         pitch: message.pitch || 75,
                         bearing: message.heading || 0,
                         duration: message.duration || 1000,
@@ -313,7 +312,7 @@ const mapHtml = `
                 console.error("WebView Internal Error:", e);
             }
         }
-
+ 
         // --- DIRECT BRIDGE FUNCTIONS (Bypass Event Latency) ---
         window.snapToLocation = (lat, lng, zoom, pitch) => {
             if (!map) return;
@@ -322,17 +321,17 @@ const mapHtml = `
             manualOverride = true;
             if (overrideTimeout) clearTimeout(overrideTimeout);
             overrideTimeout = setTimeout(() => { manualOverride = false; }, 3000);
-
+ 
             map.flyTo({
                 center: [lng, lat],
-                zoom: zoom || 20.1,
+                zoom: zoom || 19.0,
                 pitch: pitch || 75,
                 duration: 1000,
                 essential: true
             });
             window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'location_reached' }));
         };
-
+ 
         window.updateMapFollow = (enabled) => {
             isFollowing = enabled;
             if (isFollowing) performSmoothFollow();
@@ -368,7 +367,7 @@ export const WebViewMap = forwardRef<any, WebViewMapProps>(
                 webViewRef.current?.injectJavaScript(`window.snapToLocation(${region.latitude}, ${region.longitude}, 18); true;`);
             },
             animateCamera: (camera: any, options?: any) => {
-                webViewRef.current?.injectJavaScript(`window.snapToLocation(${camera.center.latitude}, ${camera.center.longitude}, ${camera.zoom || 20.1}, ${camera.pitch || 75}); true;`);
+                webViewRef.current?.injectJavaScript(`window.snapToLocation(${camera.center.latitude}, ${camera.center.longitude}, ${camera.zoom || 19.0}, ${camera.pitch || 75}); true;`);
             },
             fitToCoordinates: (coordinates: any[], options?: any) => {
                 webViewRef.current?.injectJavaScript(`handleMessage({ data: JSON.stringify({ type: 'fitToCoordinates', coordinates: ${JSON.stringify(coordinates)} }) }); true;`);
