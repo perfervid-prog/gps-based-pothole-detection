@@ -26,9 +26,11 @@ interface MapViewWrapperProps {
   markers: PotholeMarker[];
   onMarkerPress: (marker: PotholeMarker) => void;
   route?: Coordinate[] | null;
+  selectionMarker?: Coordinate | null;
+  destinationMarker?: Coordinate | null;
 }
 
-export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMarkerPress, route, userLocation }: MapViewWrapperProps) => {
+export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMarkerPress, route, userLocation, selectionMarker, destinationMarker }: MapViewWrapperProps) => {
   const iframeRef = React.useRef<any>(null);
 
   // Generate a Leaflet HTML to show in an iframe
@@ -39,6 +41,8 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
   ]));
   const routeJson = JSON.stringify(route ? route.map(r => [r.latitude, r.longitude]) : []);
   const userLocJson = JSON.stringify(userLocation ? [userLocation.latitude, userLocation.longitude] : null);
+  const selectionLocJson = JSON.stringify(selectionMarker ? [selectionMarker.latitude, selectionMarker.longitude] : null);
+  const destinationLocJson = JSON.stringify(destinationMarker ? [destinationMarker.latitude, destinationMarker.longitude] : null);
 
   const leafletHtml = `
       <!DOCTYPE html>
@@ -72,6 +76,14 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
               border-radius: 50%;
               animation: pulse 2s infinite;
           }
+          .selection-marker {
+              width: 16px;
+              height: 16px;
+              background: #10B981;
+              border-radius: 50%;
+              border: 2px solid white;
+              box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+          }
           @keyframes pulse {
               0% { transform: scale(1) translateY(0); opacity: 1; }
               100% { transform: scale(3) translateY(0); opacity: 0; }
@@ -87,6 +99,8 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
           }).addTo(map);
 
           let userMarker = null;
+          let selectionMarker = null;
+          let destMarker = null;
           const potholeMarkers = ${potholeMarkersJson};
           const routePoints = ${routeJson};
 
@@ -104,13 +118,55 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
               }
           }
 
+          function updateSelection(lat, lng) {
+              if (selectionMarker) {
+                  if (lat === null) {
+                      map.removeLayer(selectionMarker);
+                      selectionMarker = null;
+                  } else {
+                      selectionMarker.setLatLng([lat, lng]);
+                  }
+              } else if (lat !== null) {
+                  const icon = L.divIcon({
+                      className: 'selection-marker-container',
+                      html: '<div class="selection-marker"></div>',
+                      iconSize: [20, 20],
+                      iconAnchor: [10, 10]
+                  });
+                  selectionMarker = L.marker([lat, lng], { icon }).addTo(map);
+              }
+          }
+
+          function updateDestination(lat, lng) {
+              if (destMarker) {
+                  if (lat === null) {
+                      map.removeLayer(destMarker);
+                      destMarker = null;
+                  } else {
+                      destMarker.setLatLng([lat, lng]);
+                  }
+              } else if (lat !== null) {
+                  destMarker = L.marker([lat, lng]).addTo(map)
+                      .bindPopup("Destination");
+              }
+          }
+
           if (${userLocJson}) {
               const u = ${userLocJson};
               updateUserLocation(u[0], u[1]);
           }
 
+          if (${selectionLocJson}) {
+              const s = ${selectionLocJson};
+              updateSelection(s[0], s[1]);
+          }
+
+          if (${destinationLocJson}) {
+              const d = ${destinationLocJson};
+              updateDestination(d[0], d[1]);
+          }
+
           potholeMarkers.forEach(m => {
-            // Create a red-ish icon for potholes
             const potholeIcon = L.icon({
               iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
               shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
@@ -129,23 +185,19 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
           if (routePoints.length > 0) {
             const polyline = L.polyline(routePoints, { color: '${Colors.accent}', weight: 6 }).addTo(map);
             map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
-            
-            // Add destination marker
-            const destPoint = routePoints[routePoints.length - 1];
-            L.marker(destPoint).addTo(map)
-                .bindPopup("Destination")
-                .openPopup();
           }
 
-          // Handle incoming messages for location updates
+          // Handle incoming messages
           window.addEventListener('message', (event) => {
               if (event.data.type === 'update_user_location') {
                   updateUserLocation(event.data.lat, event.data.lng);
-                  
-                  // If following, center on user with a tighter zoom for navigation
                   if (event.data.follow) {
                       map.setView([event.data.lat, event.data.lng], 19, { animate: true });
                   }
+              } else if (event.data.type === 'update_selection') {
+                  updateSelection(event.data.lat, event.data.lng);
+              } else if (event.data.type === 'update_destination') {
+                  updateDestination(event.data.lat, event.data.lng);
               }
           });
         </script>
@@ -153,17 +205,37 @@ export const MapViewWrapper = ({ initialRegion, showsUserLocation, markers, onMa
       </html>
     `;
 
-  // Send location updates to iframe
+  // Send updates to iframe
   React.useEffect(() => {
     if (iframeRef.current && userLocation) {
       iframeRef.current.contentWindow.postMessage({
         type: 'update_user_location',
         lat: userLocation.latitude,
         lng: userLocation.longitude,
-        follow: !!route // Follow if we have an active route
+        follow: !!route
       }, '*');
     }
   }, [userLocation, !!route]);
+
+  React.useEffect(() => {
+    if (iframeRef.current) {
+      iframeRef.current.contentWindow.postMessage({
+        type: 'update_selection',
+        lat: selectionMarker?.latitude ?? null,
+        lng: selectionMarker?.longitude ?? null,
+      }, '*');
+    }
+  }, [selectionMarker]);
+
+  React.useEffect(() => {
+    if (iframeRef.current) {
+      iframeRef.current.contentWindow.postMessage({
+        type: 'update_destination',
+        lat: destinationMarker?.latitude ?? null,
+        lng: destinationMarker?.longitude ?? null,
+      }, '*');
+    }
+  }, [destinationMarker]);
 
   // Handle marker press message from iframe
   React.useEffect(() => {

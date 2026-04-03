@@ -72,11 +72,24 @@ const mapHtml = `
             width: 32px; height: 32px;
             background-image: url('https://cdn-icons-png.flaticon.com/512/684/684908.png');
             background-size: cover;
-            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.5));
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
         }
         .marker-selection {
-            width: 24px; height: 24px; border-radius: 12px;
-            background: rgba(16, 185, 129, 0.2); border: 2px solid #10B981;
+            width: 20px; height: 20px; border-radius: 10px;
+            background: #10B981; border: 3px solid #FFF;
+            box-shadow: 0 0 20px rgba(16,185,129,0.8);
+        }
+        .marker-selection::after {
+            content: '';
+            position: absolute;
+            top: -10px; left: -10px; right: -10px; bottom: -10px;
+            border: 4px solid rgba(16,185,129,0.3);
+            border-radius: 50%;
+            animation: pulse-green 2s infinite;
+        }
+        @keyframes pulse-green {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(2.5); opacity: 0; }
         }
     </style>
 </head>
@@ -130,6 +143,7 @@ const mapHtml = `
         });
 
         const notifyInteraction = () => {
+            manualOverride = true; // Stop following IMMEDIATELY on interaction
             window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'onMapTouchStart' }));
         };
         map.on('dragstart', notifyInteraction);
@@ -173,11 +187,21 @@ const mapHtml = `
         };
 
         let manualOverride = false;
-        let overrideTimeout = null;
 
         function performSmoothFollow() {
-            if (manualOverride || !isFollowing || !userLocation || !activeRoute || activeRoute.length < 2) return;
+            if (manualOverride || !isFollowing || !userLocation) return;
             
+            if (!activeRoute || activeRoute.length < 2) {
+                map.flyTo({
+                    center: [userLocation.longitude, userLocation.latitude],
+                    zoom: 19.0, // 🔍 MAX ZOOM
+                    pitch: 65,
+                    duration: 1200,
+                    essential: true
+                });
+                return;
+            }
+
             let minDistance = Infinity;
             let nearestIndex = 0;
             for (let i = 0; i < activeRoute.length; i++) {
@@ -195,6 +219,7 @@ const mapHtml = `
                 zoom: 19.0, // 🔍 MAX ZOOM
                 pitch: 75,
                 bearing: heading,
+                padding: { bottom: 250 },
                 duration: 1200,
                 essential: true
             });
@@ -301,9 +326,18 @@ const mapHtml = `
                 }
                 else if (message.type === 'updateDestination') {
                     if (destMarker) destMarker.remove();
-                    if (message.location) {
+                    if (message.location && message.location.latitude) {
                         const el = document.createElement('div'); el.className = 'marker-destination';
                         destMarker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+                            .setLngLat([message.location.longitude, message.location.latitude])
+                            .addTo(map);
+                    }
+                }
+                else if (message.type === 'updateSelection') {
+                    if (selectionMarker) selectionMarker.remove();
+                    if (message.location && message.location.latitude) {
+                        const el = document.createElement('div'); el.className = 'marker-selection';
+                        selectionMarker = new maplibregl.Marker({ element: el })
                             .setLngLat([message.location.longitude, message.location.latitude])
                             .addTo(map);
                     }
@@ -317,15 +351,11 @@ const mapHtml = `
         window.snapToLocation = (lat, lng, zoom, pitch) => {
             if (!map) return;
             
-            // 🔥 LOCK the camera so auto-follow doesn't fight us
-            manualOverride = true;
-            if (overrideTimeout) clearTimeout(overrideTimeout);
-            overrideTimeout = setTimeout(() => { manualOverride = false; }, 3000);
- 
             map.flyTo({
                 center: [lng, lat],
                 zoom: zoom || 19.0,
                 pitch: pitch || 75,
+                padding: { bottom: isFollowing ? 250 : 0 },
                 duration: 1000,
                 essential: true
             });
@@ -334,7 +364,10 @@ const mapHtml = `
  
         window.updateMapFollow = (enabled) => {
             isFollowing = enabled;
-            if (isFollowing) performSmoothFollow();
+            if (isFollowing) {
+                manualOverride = false;
+                performSmoothFollow();
+            }
         };
 
         window.updateUserPos = (lat, lng, isFirst) => {

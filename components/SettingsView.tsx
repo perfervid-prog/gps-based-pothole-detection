@@ -16,7 +16,7 @@ import { Ionicons, MaterialIcons, Feather, MaterialCommunityIcons } from "@expo/
 import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import { usePotholes } from "@/contexts/PotholeContext";
-import { Pothole, PROJECT_ID, getSensorStatus, getSensorConfig, updateSensorConfig, SensorConfig } from "@/lib/storage";
+import { Pothole, PROJECT_ID, getSensorStatus, getSensorConfig, updateSensorConfig, SensorConfig, SensorStatus } from "@/lib/storage";
 import { resetOnboarding, getAlertSettings, setAlertSetting } from "@/lib/onboarding";
 
 interface SettingsViewProps {
@@ -136,50 +136,55 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
   const { potholes, clearAll, removePothole, isAdmin, loginAdmin } = usePotholes();
   const [showPotholeList, setShowPotholeList] = useState(false);
   const [alertSettings, setAlertSettings] = useState({ enabled: true, sound: true, flash: true });
-  
-  // Hardware Sync State
-  const [hardwareStatus, setHardwareStatus] = useState<"searching" | "found" | "error" | "synced" | "online">("searching");
-  const [lastSeen, setLastSeen] = useState<string | null>(null);
-  const [ssid, setSsid] = useState("HAWA 4.0");
-  const [password, setPassword] = useState("10000011");
-  const [isSyncing, setIsSyncing] = useState(false);
-  const pollInterval = useRef<NodeJS.Timeout | null>(null);
-
-  const [showWifiPassword, setShowWifiPassword] = useState(false);
 
   // Sensor Calibration
-  const [calib, setCalib] = useState<SensorConfig>({ kZScore: 4.5, xJerkThreshold: 2500 });
-  const [kZScoreStr, setKZScoreStr] = useState("4.5");
-  const [xJerkThresholdStr, setXJerkThresholdStr] = useState("2500");
+  const [calib, setCalib] = useState<SensorConfig>({ dipThreshold: 150, impactThreshold: 800, potholeWindow: 300 });
+  const [dipThresholdStr, setDipThresholdStr] = useState("150");
+  const [impactThresholdStr, setImpactThresholdStr] = useState("800");
+  const [potholeWindowStr, setPotholeWindowStr] = useState("300");
   const [isSavingCalib, setIsSavingCalib] = useState(false);
+  const [sensorStatus, setSensorStatus] = useState<SensorStatus | null>(null);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(false);
+  const [distanceInput, setDistanceInput] = useState("100");
 
   useEffect(() => {
     loadSettings();
     loadCalibration();
-    startPolling();
-    return () => stopPolling();
+    loadSensorStatus();
+
+    // Poll for status while settings are open
+    const interval = setInterval(loadSensorStatus, 15000);
+    return () => clearInterval(interval);
   }, []);
+
+  const loadSensorStatus = async () => {
+    const status = await getSensorStatus();
+    setSensorStatus(status);
+  };
 
   const loadCalibration = async () => {
     const config = await getSensorConfig();
     if (config) {
       setCalib(config);
-      setKZScoreStr(config.kZScore.toString());
-      setXJerkThresholdStr(config.xJerkThreshold.toString());
+      setDipThresholdStr(config.dipThreshold.toString());
+      setImpactThresholdStr(config.impactThreshold.toString());
+      setPotholeWindowStr(config.potholeWindow.toString());
     }
   };
 
   const handleUpdateCalibration = async () => {
     setIsSavingCalib(true);
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    
+    if (Platform.OS !== "web") Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
     const configToSave: SensorConfig = {
-      kZScore: parseFloat(kZScoreStr) || 4.5,
-      xJerkThreshold: parseInt(xJerkThresholdStr) || 2500,
+      dipThreshold: parseFloat(dipThresholdStr) || 150,
+      impactThreshold: parseInt(impactThresholdStr) || 800,
+      potholeWindow: parseInt(potholeWindowStr) || 300,
     };
 
     const success = await updateSensorConfig(configToSave);
     if (success) {
+      setCalib(configToSave);
       Alert.alert("Success", "Sensor brain updated. Changes will take effect on next heartbeat (within 60s).");
     } else {
       Alert.alert("Error", "Failed to update cloud configuration.");
@@ -187,86 +192,15 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
     setIsSavingCalib(false);
   };
 
-  const startPolling = () => {
-    if (pollInterval.current) return;
-    
-    // Initial check
-    checkCloudHeartbeat();
-    
-    pollInterval.current = setInterval(async () => {
-      // 1. Try Local Hub (Setup Mode)
-      try {
-        const response = await fetch("http://192.168.4.1/handshake", { method: "GET" });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.device === "pothole-sensor") {
-            setHardwareStatus("found");
-            return;
-          }
-        }
-      } catch (e) {
-        // Fallback to Cloud Heartbeat
-        checkCloudHeartbeat();
-      }
-    }, 30000); // 30s poll
-  };
-
-  const checkCloudHeartbeat = async () => {
-    const status = await getSensorStatus();
-    if (status && status.lastSeen) {
-      const lastSeenDate = new Date(status.lastSeen).getTime();
-      const now = new Date().getTime();
-      // If seen in the last 3 minutes
-      if (now - lastSeenDate < 180000) {
-        setHardwareStatus("online");
-        setLastSeen(status.lastSeen);
-      }
-    }
-  };
-
-  const stopPolling = () => {
-    if (pollInterval.current) {
-      clearInterval(pollInterval.current);
-      pollInterval.current = null;
-    }
-  };
-
-  const handleSyncHardware = async () => {
-    setIsSyncing(true);
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    try {
-      const response = await fetch("http://192.168.4.1/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ssid: ssid,
-          pass: password,
-          fb: `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/potholes`
-        })
-      });
-
-      if (response.ok) {
-        setHardwareStatus("synced");
-        Alert.alert("Sync Successful", "Sensor updated. It will now reboot and connect to WiFi.");
-      } else {
-        throw new Error("Sync failed");
-      }
-    } catch (error) {
-      Alert.alert("Sync Failed", "Make sure you are connected to the 'Pothole-Sensor' WiFi hotspot.");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   const loadSettings = async () => {
     const settings = await getAlertSettings();
     setAlertSettings(settings);
+    setDistanceInput(settings.distance?.toString() || "100");
   };
 
-  const handleToggleAlert = async (key: keyof typeof alertSettings) => {
-    const newValue = !alertSettings[key];
-    await setAlertSetting(key, newValue);
+  const handleToggleAlert = async (key: keyof typeof alertSettings, value?: boolean | number) => {
+    const newValue = value !== undefined ? value : !alertSettings[key];
+    await setAlertSetting(key as any, newValue as any);
     setAlertSettings(prev => ({ ...prev, [key]: newValue }));
 
     if (Platform.OS !== "web") {
@@ -303,37 +237,37 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
 
     if (!isAdmin) {
       if (Platform.OS === 'web') {
-          const pass = window.prompt("Admin Password Required:");
-          if (loginAdmin(pass || "")) {
-            proceedToClear();
-          } else if (pass !== null) {
-            alert("Incorrect password.");
-          }
+        const pass = window.prompt("Admin Password Required:");
+        if (loginAdmin(pass || "")) {
+          proceedToClear();
+        } else if (pass !== null) {
+          alert("Incorrect password.");
+        }
       } else if (Platform.OS === 'ios') {
-          Alert.prompt(
-            "Admin Password Required",
-            "Enter admin password to clear all data.",
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Confirm",
-                onPress: (pass?: string) => {
-                  if (loginAdmin(pass || "")) {
-                    proceedToClear();
-                  } else {
-                    Alert.alert("Access Denied", "Incorrect administrator password.");
-                  }
-                },
+        Alert.prompt(
+          "Admin Password Required",
+          "Enter admin password to clear all data.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Confirm",
+              onPress: (pass?: string) => {
+                if (loginAdmin(pass || "")) {
+                  proceedToClear();
+                } else {
+                  Alert.alert("Access Denied", "Incorrect administrator password.");
+                }
               },
-            ],
-            "secure-text"
-          );
+            },
+          ],
+          "secure-text"
+        );
       } else {
-          Alert.alert(
-            "Admin Required",
-            "Please log in as admin first from the main menu (☰ → Admin Login), then return here to clear data.",
-            [{ text: "OK" }]
-          );
+        Alert.alert(
+          "Admin Required",
+          "Please log in as admin first from the main menu (☰ → Admin Login), then return here to clear data.",
+          [{ text: "OK" }]
+        );
       }
     } else {
       proceedToClear();
@@ -383,101 +317,60 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
         style={styles.content}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
       >
-        <Text style={styles.sectionTitle}>Hardware Optimization</Text>
-        <View style={styles.section}>
-          <View style={styles.hardwareCard}>
-            <View style={styles.statusHeader}>
-              <View style={[styles.statusDot, { backgroundColor: (hardwareStatus === "found" || hardwareStatus === "synced" || hardwareStatus === "online") ? "#10B981" : "#F59E0B" }]} />
-              <View style={styles.statusContent}>
-                <Text style={styles.statusText}>
-                  {hardwareStatus === "searching" && "Searching for Pothole Sensor..."}
-                  {hardwareStatus === "found" && "Sensor Hub Found! Connect to WiFi"}
-                  {hardwareStatus === "synced" && "Hardware Synced & Connected"}
-                  {hardwareStatus === "online" && "Sensor Online (Cloud)"}
-                </Text>
-                {hardwareStatus === "online" && lastSeen && (
-                  <Text style={styles.statusSubtitle}>Last Seen: {new Date(lastSeen).toLocaleTimeString()}</Text>
-                )}
-              </View>
-              {hardwareStatus === "searching" && <ActivityIndicator size="small" color={Colors.textSecondary} />}
-            </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Local WiFi Network</Text>
-              <TextInput
-                style={styles.input}
-                value={ssid}
-                onChangeText={setSsid}
-                placeholder="WiFi Name"
-                placeholderTextColor={Colors.textSecondary}
-              />
-              <Text style={styles.inputLabel}>WiFi Password</Text>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={[styles.input, { flex: 1, borderWidth: 0 }]}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="WiFi Password"
-                  secureTextEntry={!showWifiPassword}
-                  placeholderTextColor={Colors.textSecondary}
-                />
-                <Pressable onPress={() => setShowWifiPassword(!showWifiPassword)} style={styles.wifiEyeBtn}>
-                  <Ionicons name={showWifiPassword ? "eye-outline" : "eye-off-outline"} size={20} color={Colors.textSecondary} />
-                </Pressable>
-              </View>
-            </View>
-
-            <Pressable
-              onPress={handleSyncHardware}
-              disabled={hardwareStatus !== "found" || isSyncing}
-              style={({ pressed }) => [
-                styles.syncButton,
-                (hardwareStatus !== "found" || isSyncing) && styles.syncButtonDisabled,
-                pressed && { opacity: 0.8 }
-              ]}
-            >
-              {isSyncing ? (
-                <ActivityIndicator color="#FFF" />
-              ) : (
-                <>
-                  <MaterialCommunityIcons name="sync" size={20} color="#FFF" />
-                  <Text style={styles.syncButtonText}>Sync Config to Sensor</Text>
-                </>
-              )}
-            </Pressable>
-            
-            {hardwareStatus === "searching" && (
-              <Text style={styles.helpText}>Connect your phone to the 'Pothole-Sensor-XXXX' WiFi network to begin syncing.</Text>
-            )}
-          </View>
-        </View>
+        {/* Sensor Calibration Section */}
 
         <Text style={styles.sectionTitle}>Sensor Calibration (Math Tuning)</Text>
         <View style={styles.section}>
           <View style={styles.hardwareCard}>
+            {/* Live Sensor Status Header */}
+            <View style={styles.statusHeader}>
+              <View style={[styles.statusDot, { backgroundColor: sensorStatus?.status === 'online' ? Colors.success : Colors.error }]} />
+              <View style={styles.statusContent}>
+                <Text style={styles.statusText}>
+                  {sensorStatus ? `PotholeBrain v${sensorStatus.firmware}` : "Detecting Sensor..."}
+                </Text>
+                <Text style={styles.statusSubtitle}>
+                  {sensorStatus ? `Last Seen: ${new Date(sensorStatus.lastSeen).toLocaleTimeString()}` : "Hardware not detected via cloud"}
+                </Text>
+              </View>
+              {isLoadingStatus ? <ActivityIndicator size="small" color={Colors.primary} /> : null}
+            </View>
+
             <View style={styles.inputGroup}>
               <View style={styles.calibHeader}>
-                <Text style={styles.inputLabel}>Statistical Sensitivity (kZScore)</Text>
-                <Text style={styles.calibVal}>{kZScoreStr || "4.5"}</Text>
+                <Text style={styles.inputLabel}>Dip Sensitivity (DIP_THRESHOLD)</Text>
+                <Text style={styles.calibVal}>{dipThresholdStr || "50"}</Text>
               </View>
-              <Text style={styles.helpText}>Higher = Less sensitive. (4.0 - 6.0 is standard)</Text>
+              <Text style={styles.helpText}>Lower = More sensitive to dips. (Typical: 30 - 80)</Text>
               <TextInput
                 style={styles.input}
-                value={kZScoreStr}
+                value={dipThresholdStr}
                 keyboardType="numeric"
-                onChangeText={setKZScoreStr}
+                onChangeText={setDipThresholdStr}
               />
-              
-              <View style={[styles.calibHeader, { marginTop: 8 }]}>
-                <Text style={styles.inputLabel}>Impact Thud (X-Jerk Threshold)</Text>
-                <Text style={styles.calibVal}>{xJerkThresholdStr || "2500"}</Text>
+
+              <View style={[styles.calibHeader, { marginTop: 12 }]}>
+                <Text style={styles.inputLabel}>Impact Force (IMPACT_THRESHOLD)</Text>
+                <Text style={styles.calibVal}>{impactThresholdStr || "500"}</Text>
               </View>
-              <Text style={styles.helpText}>Force needed to confirm road hit. (1000 - 5000 range)</Text>
+              <Text style={styles.helpText}>Force needed to confirm road hit. (Range: 300 - 1500)</Text>
               <TextInput
                 style={styles.input}
-                value={xJerkThresholdStr}
+                value={impactThresholdStr}
                 keyboardType="numeric"
-                onChangeText={setXJerkThresholdStr}
+                onChangeText={setImpactThresholdStr}
+              />
+
+              <View style={[styles.calibHeader, { marginTop: 12 }]}>
+                <Text style={styles.inputLabel}>Pothole Window (ms)</Text>
+                <Text style={styles.calibVal}>{potholeWindowStr || "300"}</Text>
+              </View>
+              <Text style={styles.helpText}>Time allowed between dip and impact. (Hardware default: 300ms)</Text>
+              <TextInput
+                style={styles.input}
+                value={potholeWindowStr}
+                keyboardType="numeric"
+                onChangeText={setPotholeWindowStr}
               />
             </View>
 
@@ -601,6 +494,38 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                   value={alertSettings.flash}
                   onValueChange={() => handleToggleAlert("flash")}
                   trackColor={{ false: "#D1D1D1", true: Colors.primary }}
+                />
+              </View>
+
+              <View style={styles.separator} />
+              <View style={styles.settingRow}>
+                <View style={styles.settingIcon}>
+                  <MaterialIcons name="straighten" size={22} color={Colors.primary} />
+                </View>
+                <View style={styles.settingContent}>
+                  <Text style={styles.settingLabel}>Alert Proximity (meters)</Text>
+                  <Text style={styles.settingSubtitle}>Warning distance (Range: 20m - 500m)</Text>
+                </View>
+                <TextInput
+                  style={[styles.input, { width: 80, textAlign: 'center', height: 40 }]}
+                  value={distanceInput}
+                  keyboardType="numeric"
+                  onChangeText={setDistanceInput}
+                  onBlur={() => {
+                    const num = parseInt(distanceInput) || 100;
+                    if (num >= 20 && num <= 1000) {
+                      handleToggleAlert("distance", num);
+                    } else {
+                      // Reset to current saved distance if invalid
+                      setDistanceInput(alertSettings.distance?.toString() || "100");
+                    }
+                  }}
+                  onSubmitEditing={() => {
+                    const num = parseInt(distanceInput) || 100;
+                    if (num >= 20 && num <= 1000) {
+                      handleToggleAlert("distance", num);
+                    }
+                  }}
                 />
               </View>
             </>

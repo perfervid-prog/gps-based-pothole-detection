@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Flowchart Render (Light)</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            background-color: #f8fafc;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        #chart-container {
+            background: #ffffff;
+            padding: 50px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
+            max-width: 95%;
+        }
+        .mermaid {
+            background: transparent !important;
+        }
+    </style>
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            securityLevel: 'loose',
+            themeVariables: {
+                primaryColor: '#e0f2fe',
+                primaryTextColor: '#0369a1',
+                primaryBorderColor: '#7dd3fc',
+                lineColor: '#64748b',
+                secondaryColor: '#f1f5f9',
+                tertiaryColor: '#ffffff',
+                mainBkg: '#f0f9ff',
+                nodeBorder: '#0ea5e9'
+            }
+        });
+    </script>
+</head>
+<body>
+    <div id="chart-container">
+        <div class="mermaid">
+            graph TD
+                subgraph "1. HARDWARE (ESP32 Sensor)"
+                    A[Read Vibration Sensor] --> B{Big Bump Found?}
+                    B -- Yes --> C[Get GPS Location]
+                    C --> D[Send to Internet]
+                    
+                    H[Cloud Sync] -->|Every 10s| A
+                end
+
+                subgraph "2. INTERNET (Firestore)"
+                    D --> E[(Pothole List)]
+                    F[Settings] --> H
+                end
+
+                subgraph "3. MOBILE APP (User)"
+                    E --> G[Hazard Scanner]
+                    G --> I{Pothole in Path?}
+                    I -- Yes --> J[[AUDIO + VISUAL ALERT]]
+                    
+                    K[Settings Menu] -->|Save| F
+                end
+
+                linkStyle default stroke:#64748b,stroke-width:2px;
+                style J fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#991b1b
+                style E fill:#e0f2fe,stroke:#0ea5e9,stroke-width:1px,color:#0369a1
+                style B fill:#f8fafc,stroke:#0ea5e9,stroke-width:2px,color:#0f172a
+                style I fill:#f8fafc,stroke:#0ea5e9,stroke-width:2px,color:#0f172a
+                style A fill:#ffffff,stroke:#64748b
+                style C fill:#ffffff,stroke:#64748b
+                style D fill:#ffffff,stroke:#64748b
+                style G fill:#ffffff,stroke:#64748b
+                style K fill:#ffffff,stroke:#64748b
+                style F fill:#ffffff,stroke:#64748b
+        </div>
+    </div>
+</body>
+</html>

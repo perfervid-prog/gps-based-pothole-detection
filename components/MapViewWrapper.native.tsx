@@ -76,6 +76,7 @@ export const MapViewWrapper = forwardRef<any, MapViewWrapperProps>(
         mapType={mapType}
         pitchEnabled={true}
         showsBuildings={true}
+        mapPadding={{ top: 0, right: 0, bottom: isAutoFollowing ? 250 : 0, left: 0 }}
         onMapReady={() => {
           // Smooth Native 3D Swoop
           if (ref && 'current' in ref && ref.current) {

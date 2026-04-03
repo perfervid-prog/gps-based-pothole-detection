@@ -214,8 +214,9 @@ export async function getSensorStatus(): Promise<SensorStatus | null> {
   }
 }
 export interface SensorConfig {
-  kZScore: number;
-  xJerkThreshold: number;
+  dipThreshold: number;
+  impactThreshold: number;
+  potholeWindow: number;
 }
 
 export async function getSensorConfig(): Promise<SensorConfig | null> {
@@ -225,8 +226,9 @@ export async function getSensorConfig(): Promise<SensorConfig | null> {
     if (!response.ok) return null;
     const doc = await response.json();
     return {
-      kZScore: parseFloat(doc.fields.kZScore?.doubleValue || "4.5"),
-      xJerkThreshold: parseInt(doc.fields.xJerkThreshold?.integerValue || "2500"),
+      dipThreshold: parseFloat(doc.fields.dipThreshold?.doubleValue || "150"),
+      impactThreshold: parseInt(doc.fields.impactThreshold?.integerValue || "800"),
+      potholeWindow: parseInt(doc.fields.potholeWindow?.integerValue || "300"),
     };
   } catch (error) {
     console.log("Failed to fetch sensor config");
@@ -237,13 +239,14 @@ export async function getSensorConfig(): Promise<SensorConfig | null> {
 export async function updateSensorConfig(config: SensorConfig): Promise<boolean> {
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/potholes/sensor_config`;
   try {
-    const response = await fetch(url + "?updateMask.fieldPaths=kZScore&updateMask.fieldPaths=xJerkThreshold", {
+    const response = await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         fields: {
-          kZScore: { doubleValue: config.kZScore },
-          xJerkThreshold: { integerValue: config.xJerkThreshold.toString() },
+          dipThreshold: { doubleValue: config.dipThreshold },
+          impactThreshold: { integerValue: config.impactThreshold.toString() },
+          potholeWindow: { integerValue: config.potholeWindow.toString() },
         },
       }),
     });

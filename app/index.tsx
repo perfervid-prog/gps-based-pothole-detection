@@ -142,16 +142,14 @@ export default function HomeScreen() {
   } = usePotholes();
 
   const handleMapTouchStart = useCallback(() => {
-    setIsManualInteracting(true);
-    if (manualInteractionTimer.current) clearTimeout(manualInteractionTimer.current);
-    manualInteractionTimer.current = setTimeout(() => {
-      setIsManualInteracting(false);
-    }, 8000); // Wait 8 seconds before resuming auto-follow
+    // When the user drags the map, stop following them.
+    // They must press the "My Location" button to re-engage auto-follow.
+    setIsAutoFollowing(false);
   }, []);
 
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>("loading");
   const [vehicleType, setVehicleTypeState] = useState<VehicleType | null>(null);
-  const [alertSettings, setAlertSettings] = useState({ enabled: true, sound: true, flash: true });
+  const [alertSettings, setAlertSettings] = useState({ enabled: true, sound: true, flash: true, distance: 100 });
   const [isAlerting, setIsAlerting] = useState(false);
   const [isHazardNearby, setIsHazardNearby] = useState(false);
   const lastAlertTime = React.useRef(0);
@@ -169,16 +167,28 @@ export default function HomeScreen() {
   const [isProcessingRoute, setIsProcessingRoute] = useState(false);
   const [destinationName, setDestinationName] = useState<string>("");
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
-  const [isAutoFollowing, setIsAutoFollowing] = useState(false);
+  const [isAutoFollowing, setIsAutoFollowing] = useState(true); // Default to follow user on start
   const [navigationState, setNavigationState] = useState<"none" | "overview" | "following">("none");
   const [adminLoginVisible, setAdminLoginVisible] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [isPickingFromMap, setIsPickingFromMap] = useState(false);
-  const [isManualInteracting, setIsManualInteracting] = useState(false);
-  const manualInteractionTimer = useRef<NodeJS.Timeout | null>(null);
   const [mapSelectionPoint, setMapSelectionPoint] = useState<Coordinate | null>(null);
   const [nearestPathIndex, setNearestPathIndex] = useState(0);
   const mapRef = useRef<any>(null);
+
+  // Map/Location "Pulse" Sync (Every 4 seconds)
+  useEffect(() => {
+    if (onboardingStep !== "done") return;
+    
+    const pulseInterval = setInterval(() => {
+      if (isAutoFollowing && userLocation && mapRef.current) {
+        console.log("📍 Syncing map to current location (Pulse)");
+        handleMyLocation(true); // Pass true to skip haptics on auto-pulse
+      }
+    }, 4000);
+
+    return () => clearInterval(pulseInterval);
+  }, [onboardingStep, isAutoFollowing, userLocation]);
 
   const loadAlertSettings = async () => {
     const settings = await getAlertSettings();
@@ -309,10 +319,9 @@ export default function HomeScreen() {
         setSearchHistory(newHistory);
         await AsyncStorage.setItem("search_history", JSON.stringify(newHistory));
 
-        // Transition directly to 3D following (Consolidated)
+        // Transition directly to 3D navigation
         setOnboardingStep("done");
         await setOnboardingComplete();
-        setIsManualInteracting(false);
         setNavigationState("following");
         setIsAutoFollowing(true);
         calculateRiskScore(path);
@@ -415,7 +424,6 @@ export default function HomeScreen() {
     setActiveRoute(null);
   };
 
-
   const handleChangeVehicle = () => {
     setOnboardingStep("vehicle");
     setActiveRoute(null);
@@ -423,9 +431,7 @@ export default function HomeScreen() {
 
   const requestLocation = useCallback(async () => {
     setIsLoadingLocation(true);
-    setIsManualInteracting(false);
 
-    // 5-second timeout safety
     const timeoutId = setTimeout(() => {
       setIsLoadingLocation(false);
     }, 5000);
@@ -455,23 +461,19 @@ export default function HomeScreen() {
           return;
         }
 
-        // 1. Instant Response: Use Last Known (Max Snap)
         const lastLoc = await Location.getLastKnownPositionAsync();
         if (lastLoc) {
           const lastPos = { latitude: lastLoc.coords.latitude, longitude: lastLoc.coords.longitude };
           setUserLocation(lastPos);
-          // 🔍 MAX ZOOM: Synchronized with Navigation View
           mapRef.current?.animateCamera({ center: lastPos, zoom: 19.0, pitch: 75, heading: 0 }, { duration: 600 });
         }
 
-        // 2. High Accuracy Update (Deep Max)
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         clearTimeout(timeoutId);
         if (pos) {
           const newPos = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-          setUserLocation(newPos);
-          // 🔍 MAX ZOOM: Synchronized with Navigation View
           mapRef.current?.animateCamera({ center: newPos, zoom: 19.0, pitch: 75, heading: 0 }, { duration: 800 });
+          setIsAutoFollowing(true);
         }
         setIsLoadingLocation(false);
       }
@@ -482,7 +484,6 @@ export default function HomeScreen() {
     }
   }, [mapRef.current]);
 
-  // Real-time location watcher
   useEffect(() => {
     let watchSubscription: any = null;
 
@@ -531,14 +532,38 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // Initial Route Zoom Effect: Fit to whole path when route is first loaded
-  /* 
-     Overview feature removed to favor instant 3D navigation as requested by user.
-     Direct transition now happens in handleRouteSelect.
-  */
+  useEffect(() => {
+    if (Platform.OS !== "web" && mapRef.current && userLocation && isAutoFollowing) {
+      let heading = 0;
+      if (navigationState === "following" && activeRoute && activeRoute.length > 1) {
+        let minDistance = Infinity;
+        let nearestIndex = 0;
+        for (let i = 0; i < activeRoute.length; i++) {
+          const dist = getDistance(userLocation, activeRoute[i]);
+          if (dist < minDistance) {
+            minDistance = dist;
+            nearestIndex = i;
+          }
+        }
+        let lookaheadDistance = 0;
+        let lookaheadIndex = nearestIndex;
+        for (let i = nearestIndex; i < activeRoute.length - 1; i++) {
+          lookaheadDistance += getDistance(activeRoute[i], activeRoute[i + 1]);
+          lookaheadIndex = i + 1;
+          if (lookaheadDistance >= MAP_CONFIG.LOOKAHEAD_DISTANCE) break;
+        }
+        heading = calculateBearing(userLocation, activeRoute[lookaheadIndex]);
+      }
 
-  // Dynamic Road-Following now handled internally by WebViewMap Voyager 2.0
-  // React side only calculates risk score and alerts.
+      mapRef.current.animateCamera({
+        center: userLocation,
+        heading: heading,
+        pitch: navigationState === "following" ? MAP_CONFIG.PITCH : 65,
+        zoom: MAP_CONFIG.ZOOM,
+      }, { duration: 1000 });
+    }
+  }, [userLocation, navigationState, isAutoFollowing]);
+
   useEffect(() => {
     if (navigationState === "following" && activeRoute && userLocation) {
       let minDistance = Infinity;
@@ -554,23 +579,15 @@ export default function HomeScreen() {
     }
   }, [userLocation?.latitude, userLocation?.longitude, navigationState, activeRoute?.length]);
 
-  // Proximity Warning Logic
   useEffect(() => {
-    // Only alert if:
-    // 1. Alerts are enabled
-    // 2. We have location and potholes
-    // 3. User is NOT in setup/search (onboardingStep === 'done')
-    // 4. User is actively navigating (navigationState !== 'none' and has route)
     if (!alertSettings.enabled || !userLocation || potholes.length === 0 ||
       onboardingStep !== "done" || navigationState === "none" || !activeRoute) {
       if (isHazardNearby) setIsHazardNearby(false);
       return;
     }
 
-    // Threshold: 100m for motor vehicles, 10m for walking
-    const threshold = vehicleType === "walking" ? 10 : 100;
+    const threshold = vehicleType === "walking" ? Math.min(20, alertSettings.distance) : alertSettings.distance;
 
-    // Find nearby potholes that are ALSO on the path
     const nearby = potholes.filter(p => {
       const potholeCoord = {
         latitude: typeof p.latitude === 'string' ? parseFloat(p.latitude) : p.latitude,
@@ -580,12 +597,11 @@ export default function HomeScreen() {
       const distToUser = getDistance(userLocation, potholeCoord);
       if (distToUser > threshold) return false;
 
-      // New Path Constraint: Only alert if it's on our active route (within 15m of the line)
       if (activeRoute) {
         return isPointNearPath(potholeCoord, activeRoute, 15);
       }
 
-      return true; // If no route, alert based on radius only
+      return true;
     });
 
     const isNearby = nearby.length > 0;
@@ -594,7 +610,6 @@ export default function HomeScreen() {
     }
   }, [userLocation, potholes, alertSettings, vehicleType, onboardingStep, navigationState, !!activeRoute]);
 
-  // Flash Alert Animation (2s loop: 1s on, 1s off)
   useEffect(() => {
     let interval: any;
     if (isHazardNearby && alertSettings.flash && alertSettings.enabled) {
@@ -607,7 +622,6 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [isHazardNearby, alertSettings.flash, alertSettings.enabled]);
 
-  // Periodic Audio Alert (5s interval)
   useEffect(() => {
     let interval: any;
     if (isHazardNearby && alertSettings.sound && alertSettings.enabled) {
@@ -618,7 +632,7 @@ export default function HomeScreen() {
         speakAlert("Pothole ahead");
       };
 
-      triggerAlert(); // Initial alert
+      triggerAlert();
       interval = setInterval(triggerAlert, 8000);
     }
     return () => clearInterval(interval);
@@ -728,7 +742,7 @@ export default function HomeScreen() {
     }
   };
 
-  const handleMarkerPress = (pothole: typeof potholes[number]) => {
+  const handleMarkerPress = (pothole: any) => {
     setSelectedPothole(pothole);
     setUpdateModalVisible(true);
   };
@@ -738,15 +752,14 @@ export default function HomeScreen() {
     setSelectedPothole(null);
   };
 
-  const handleMyLocation = async () => {
-    if (Platform.OS !== "web") {
+  const handleMyLocation = async (skipHaptics = false) => {
+    if (!skipHaptics && Platform.OS !== "web") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
-    if (userLocation && mapRef.current && Platform.OS !== "web") {
+    if (userLocation && mapRef.current) {
       let heading = 0;
 
-      // If we are currently navigating, calculate alignment for the focus button too
       if (navigationState === "following" && activeRoute) {
         let minDistance = Infinity;
         let nearestIndex = 0;
@@ -771,15 +784,14 @@ export default function HomeScreen() {
       mapRef.current.animateCamera({
         center: userLocation,
         heading: heading,
-        pitch: MAP_CONFIG.PITCH, // Always use Navigation Pitch
-        zoom: MAP_CONFIG.ZOOM,   // Always use Navigation Zoom
+        pitch: MAP_CONFIG.PITCH,
+        zoom: MAP_CONFIG.ZOOM,
       }, { duration: 800 });
 
       setIsAutoFollowing(true);
     }
   };
 
-  // Onboarding screens
   if (onboardingStep === "loading") {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
@@ -819,11 +831,10 @@ export default function HomeScreen() {
 
   const handlePickFromMap = () => {
     setIsPickingFromMap(true);
-    setOnboardingStep("done"); // Slide back to map
+    setOnboardingStep("done");
     setActiveRoute(null);
     setMapSelectionPoint(null);
 
-    // Zoom in with navigation settings for a "Pro" feel
     if (userLocation && mapRef.current && Platform.OS !== "web") {
       mapRef.current.animateCamera({
         center: userLocation,
@@ -844,11 +855,9 @@ export default function HomeScreen() {
     if (!mapSelectionPoint) return;
 
     setIsProcessingRoute(true);
-    // Default fallback name
     let name = `${mapSelectionPoint.latitude.toFixed(4)}, ${mapSelectionPoint.longitude.toFixed(4)}`;
 
     try {
-      // 1. Try to reverse geocode to get a readable name
       const addressResults = await Location.reverseGeocodeAsync({
         latitude: mapSelectionPoint.latitude,
         longitude: mapSelectionPoint.longitude,
@@ -864,23 +873,19 @@ export default function HomeScreen() {
     }
 
     try {
-      // 2. Trigger routing (independent of geocoding success)
       await handleRouteSelect("Current Location", name, name, mapSelectionPoint);
       setIsPickingFromMap(false);
       setMapSelectionPoint(null);
     } catch (error) {
-      // Error already alerted in handleRouteSelect
     } finally {
       setIsProcessingRoute(false);
     }
   };
 
-  // Main app screens
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
 
-      {/* Global Onboarding & Search Overlays (Preserves Map State) */}
       {onboardingStep === "route_selection" && (
         <View style={[StyleSheet.absoluteFill, { zIndex: 1000 }]}>
           <RouteSelection
@@ -916,7 +921,6 @@ export default function HomeScreen() {
             markers={potholes}
             onMarkerPress={handleMarkerPress}
             onMapPress={(coord) => {
-              console.log("Map Pressed at:", coord, "isPickingFromMap:", isPickingFromMap);
               if (isPickingFromMap) {
                 setMapSelectionPoint(coord);
                 if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1056,8 +1060,6 @@ export default function HomeScreen() {
           )}
         </View>
       )}
-
-
 
       <DrawerMenu
         visible={drawerVisible}
