@@ -89,6 +89,22 @@ npm run server:dev
 | `npm run lint`    | Run ESLint checks                        |
 | `npm run lint:fix`| Auto-fix ESLint issues                   |
 
+## 📟 Hardware / IoT Node (ESP32)
+
+The repository includes firmware in `arduino-code/pothole.ino` for an ESP32-based real-time automated detection unit that syncs with Firebase Firestore.
+
+### Hardware Components
+- **Microcontroller**: ESP32 Dev Module
+- **IMU**: MPU-6050 (Accelerometer + Gyroscope, I2C on GPIO 21/22)
+- **GPS**: NEO-6M / TinyGPS++ compatible module (UART2 on RX: GPIO 16, TX: GPIO 17)
+- **Status Indicator**: LED on GPIO 2
+
+### Arduino IDE Libraries Required
+- `Adafruit MPU6050` & `Adafruit Unified Sensor`
+- `TinyGPSPlus`
+- `ArduinoJson` (v6)
+- `WiFiClientSecure` & `HTTPClient` (ESP32 core)
+
 ## 📁 Project Structure
 
 ```
@@ -98,6 +114,8 @@ pothole-detection-app/
 │   ├── index.tsx           # Home screen (map view)
 │   ├── +not-found.tsx      # 404 screen
 │   └── +native-intent.tsx  # Deep linking config
+├── arduino-code/           # ESP32 IoT firmware for road sensing
+│   └── pothole.ino         # Main Arduino sketch (MPU6050 + GPS + Firestore sync)
 ├── components/             # Reusable UI components
 │   ├── AppHeader.tsx       # Top navigation bar
 │   ├── DrawerMenu.tsx      # Side navigation drawer
